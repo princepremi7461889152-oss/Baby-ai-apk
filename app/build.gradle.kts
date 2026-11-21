@@ -22,7 +22,7 @@ android {
   compileSdk { version = release(36) { minorApiLevel = 1 } }
 
   defaultConfig {
-    applicationId = "com.blurr.voice"
+    applicationId = "com.aistudio.baby.krmxvp"
     minSdk = 24
     targetSdk = 36
     versionCode = versionProps.getProperty("VERSION_CODE", "13").toInt()
