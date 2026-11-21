@@ -28,16 +28,17 @@ jobs:
       - name: Verify Java environment
         run: |
           set -euo pipefail
-          java -version 2>&1
+          JAVA_VERSION_OUT="$(java -version 2>&1 || true)"
+          printf '%s\n' "$JAVA_VERSION_OUT"
           echo "JAVA_HOME=${JAVA_HOME:-}"
 
-          JAVA_VERSION_LINE="$(java -version 2>&1 | head -n 1 || true)"
+          JAVA_VERSION_LINE="$(printf '%s\n' "$JAVA_VERSION_OUT" | head -n 1)"
           if [ -z "$JAVA_VERSION_LINE" ]; then
             echo "::error::Java could not be detected."
             exit 1
           fi
 
-          JAVA_MAJOR="$(echo "$JAVA_VERSION_LINE" | sed -nE 's/.*version "([0-9]+)(\.[0-9]+)?.*/\1/p')"
+          JAVA_MAJOR="$(printf '%s' "$JAVA_VERSION_LINE" | sed -nE 's/.*version "([0-9]+)(\.[0-9]+)?.*/\1/p')"
           if [ -z "$JAVA_MAJOR" ]; then
             echo "::error::Unable to detect active Java major version from: $JAVA_VERSION_LINE"
             exit 1
@@ -49,10 +50,16 @@ jobs:
             exit 1
           fi
 
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          accept-android-sdk-licenses: "true"
+          packages: "platform-tools platforms;android-36.1 platforms;android-36 build-tools;36.0.0"
+
       - name: Set up Gradle 9.3.1
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: 9.3.1
+          gradle-version: "9.3.1"
 
       - name: Create temporary debug keystore
         run: |
@@ -64,7 +71,6 @@ jobs:
             fi
 
             "$KEYTOOL_BIN" -genkeypair \
-              -v \
               -keystore ./debug.keystore \
               -storepass android \
               -alias androiddebugkey \
@@ -72,7 +78,7 @@ jobs:
               -dname "CN=Android Debug,O=Android,C=US" \
               -keyalg RSA \
               -keysize 2048 \
-              -validity 10000 >/dev/null 2>&1
+              -validity 10000 >/dev/null
           fi
 
           if [ ! -f ./debug.keystore ]; then
@@ -186,24 +192,24 @@ jobs:
 
           RELEASE_TAG="debug-apk-build-${GITHUB_RUN_NUMBER}-${GITHUB_RUN_ATTEMPT}"
           RELEASE_TITLE="Debug APK Build #${GITHUB_RUN_NUMBER}"
-          RELEASE_NOTES=$(cat <<EOF
-          This is an automatically generated debug APK.
-
-          - Built by: GitHub Actions
-          - GitHub Actions run number: ${GITHUB_RUN_NUMBER}
-          - GitHub Actions run attempt: ${GITHUB_RUN_ATTEMPT}
-          - Source commit SHA: ${GITHUB_SHA}
-          - Purpose: Intended for testing only
-          - Distribution notice: Not a Play Store production release
-          - Signing notice: Signed only with a temporary debug keystore
-          EOF
-          )
+          NOTES_FILE="$(mktemp)"
+          {
+            echo "This is an automatically generated debug APK."
+            echo ""
+            echo "- Built by: GitHub Actions"
+            echo "- GitHub Actions run number: ${GITHUB_RUN_NUMBER}"
+            echo "- GitHub Actions run attempt: ${GITHUB_RUN_ATTEMPT}"
+            echo "- Source commit SHA: ${GITHUB_SHA}"
+            echo "- Purpose: Intended for testing only"
+            echo "- Distribution notice: Not a Play Store production release"
+            echo "- Signing notice: Signed only with a temporary debug keystore"
+          } > "$NOTES_FILE"
 
           gh release create "$RELEASE_TAG" "$ASSET_PATH" \
             --title "$RELEASE_TITLE" \
             --target "$GITHUB_SHA" \
             --latest \
-            --notes "$RELEASE_NOTES"
+            --notes-file "$NOTES_FILE"
 
       - name: Report APK download result
         if: always()
