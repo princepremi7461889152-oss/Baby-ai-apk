@@ -1,0 +1,113 @@
+{
+  "entities": {
+    "UserAccount": {
+      "title": "UserAccount",
+      "description": "Authenticated user profile, subscription tier, task allowance, memories, and activity history.",
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string",
+          "description": "User email address from Google Sign-In"
+        },
+        "plan": {
+          "type": "string",
+          "enum": ["free", "pro"],
+          "description": "Subscription tier"
+        },
+        "tasksRemaining": {
+          "type": "number",
+          "description": "Remaining free automation tasks"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Account creation server timestamp"
+        },
+        "memories": {
+          "type": "array",
+          "description": "List of user memory entries"
+        },
+        "taskHistory": {
+          "type": "array",
+          "description": "List of automation task execution events"
+        },
+        "conversationHistory": {
+          "type": "array",
+          "description": "List of voice conversation summaries"
+        },
+        "messageHistory": {
+          "type": "array",
+          "description": "List of recent conversation messages"
+        }
+      },
+      "required": ["email", "plan", "tasksRemaining", "createdAt"]
+    },
+    "GeminiLog": {
+      "title": "GeminiLog",
+      "description": "Per-user AI inference trace saved under users/{userId}/gemini_logs",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Owner Firebase UID"
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Inference server timestamp"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pass", "error"]
+        },
+        "attempt": {
+          "type": "number"
+        },
+        "model": {
+          "type": "string"
+        },
+        "prompt": {
+          "type": "string"
+        },
+        "imagesCount": {
+          "type": "number"
+        },
+        "responseTimeMs": {
+          "type": "number"
+        },
+        "llmReply": {
+          "type": "string"
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "required": ["userId", "timestamp", "status", "attempt", "model", "prompt", "imagesCount", "responseTimeMs"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": {
+        "$ref": "#/entities/UserAccount"
+      },
+      "description": "User-owned profile, freemium allowance, memories, and task/conversation history."
+    },
+    "/users/{userId}/gemini_logs/{logId}": {
+      "schema": {
+        "$ref": "#/entities/GeminiLog"
+      },
+      "description": "User-owned Firebase AI inference logs."
+    },
+    "/settings/{settingId}": {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "developerMessage": {
+            "type": "string"
+          }
+        }
+      },
+      "description": "Read-only app configuration documents."
+    }
+  }
+}
