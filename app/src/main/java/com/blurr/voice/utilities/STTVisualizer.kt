@@ -5,6 +5,7 @@ import android.graphics.PixelFormat
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.provider.Settings
 import android.view.Gravity
 import android.view.WindowManager
 import android.util.Log
@@ -23,12 +24,15 @@ class STTVisualizer(private val context: Context) {
             if (visualizerView != null) {
                 return@post // Already showing
             }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(context)) {
+                Log.w("STTVisualizer", "Overlay permission not granted; skipping visualizer overlay.")
+                return@post
+            }
             Log.d("STTVisualizer", "Showing visualizer")
 
-            // CHANGED: Instantiate the new wave view
-            visualizerView = AudioWaveView(context)
+            val waveView = AudioWaveView(context)
+            visualizerView = waveView
 
-            // CHANGED: Layout parameters are adjusted for the wave view
             val params = WindowManager.LayoutParams(
                 WindowManager.LayoutParams.MATCH_PARENT,
                 300, // Give the view a fixed height (e.g., 300 pixels)
@@ -40,13 +44,13 @@ class STTVisualizer(private val context: Context) {
                 PixelFormat.TRANSLUCENT
             ).apply {
                 gravity = Gravity.BOTTOM // Position at the very bottom
-                // y = 0 // No offset from the bottom
             }
 
             try {
-                windowManager.addView(visualizerView, params)
+                windowManager.addView(waveView, params)
             } catch (e: Exception) {
                 Log.e("STTVisualizer", "Failed to add view. Do you have overlay permissions?", e)
+                visualizerView = null
             }
         }
     }

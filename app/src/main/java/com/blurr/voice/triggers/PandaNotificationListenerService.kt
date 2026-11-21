@@ -38,7 +38,9 @@ class PandaNotificationListenerService : NotificationListenerService() {
 
             // If no "All Applications" trigger is found, check for a specific app trigger
             if (matchingTrigger == null) {
-                matchingTrigger = notificationTriggers.find { it.packageName == packageName }
+                matchingTrigger = notificationTriggers.find { trigger ->
+                    trigger.packageName?.split(",")?.any { it.trim() == packageName } == true
+                }
             }
 
             if (matchingTrigger != null) {

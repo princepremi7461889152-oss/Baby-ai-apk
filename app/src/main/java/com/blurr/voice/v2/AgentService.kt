@@ -12,6 +12,7 @@ import android.os.IBinder
 import android.util.Log
 import androidx.annotation.RequiresApi
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import com.blurr.voice.R
 import com.blurr.voice.api.Eyes
 import com.blurr.voice.api.Finger
@@ -88,10 +89,8 @@ class AgentService : Service() {
          */
         fun stop(context: Context) {
             Log.d("AgentService", "External stop request received.")
-            val intent = Intent(context, AgentService::class.java).apply {
-                action = ACTION_STOP_SERVICE
-            }
-            context.startService(intent)
+            if (!isRunning) return
+            context.stopService(Intent(context, AgentService::class.java))
         }
 
         fun start(context: Context, task: String) {
@@ -100,7 +99,7 @@ class AgentService : Service() {
                 putExtra(EXTRA_TASK, task)
             }
             try {
-                kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
                     try {
                         com.blurr.voice.utilities.FreemiumManager().decrementTaskCount()
                     } catch (_: Exception) {
@@ -108,7 +107,7 @@ class AgentService : Service() {
                 }
             } catch (_: Exception) {
             }
-            context.startService(intent)
+            ContextCompat.startForegroundService(context, intent)
         }
     }
     @RequiresApi(Build.VERSION_CODES.R)
@@ -154,6 +153,8 @@ class AgentService : Service() {
             return START_NOT_STICKY
         }
 
+        startForeground(NOTIFICATION_ID, createNotification("Agent is starting..."))
+
         // Add new task to the queue
         intent?.getStringExtra(EXTRA_TASK)?.let {
             if (it.isNotBlank()) {
@@ -169,8 +170,12 @@ class AgentService : Service() {
                 processTaskQueue()
             }
         } else {
-            if(isRunning) Log.d(TAG, "Task added to queue. Processor is already running.")
-            else Log.d(TAG, "Service started with no task, waiting for tasks.")
+            if (isRunning) Log.d(TAG, "Task added to queue. Processor is already running.")
+            else {
+                Log.d(TAG, "Service started with no task, stopping.")
+                stopSelf()
+                return START_NOT_STICKY
+            }
         }
 
         // Use START_STICKY to ensure the service stays running in the background
@@ -188,7 +193,6 @@ class AgentService : Service() {
 
         Log.i(TAG, "Starting task processing loop.")
         val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        startForeground(NOTIFICATION_ID, createNotification("Agent is starting..."))
 
         while (taskQueue.isNotEmpty()) {
             val task = taskQueue.poll() ?: continue // Dequeue task, continue if null
@@ -210,7 +214,7 @@ class AgentService : Service() {
             }
         }
 
-        Log.i(TAG, "Task queue is ActionExecutorempty. Stopping service.")
+        Log.i(TAG, "Task queue is empty. Stopping service.")
         stopSelf() // Stop the service only when the queue is empty
     }
 

@@ -24,22 +24,29 @@ class ChargingStateReceiver : BroadcastReceiver() {
         val status = if (action == Intent.ACTION_POWER_CONNECTED) "Connected" else "Disconnected"
         Log.d(TAG, "Device charging status: $status")
 
+        val pendingResult = goAsync()
         CoroutineScope(Dispatchers.IO).launch {
-            val triggerManager = TriggerManager.getInstance(context)
-            val triggers = triggerManager.getTriggers()
-            val matchingTriggers = triggers.filter {
-                it.isEnabled && it.type == TriggerType.CHARGING_STATE && it.chargingStatus == status
-            }
-
-            Log.d(TAG, "Found ${matchingTriggers.size} matching triggers for status '$status'")
-
-            matchingTriggers.forEach { trigger ->
-                Log.d(TAG, "Executing trigger: ${trigger.id} - ${trigger.instruction}")
-                val executeIntent = Intent(context, TriggerReceiver::class.java).apply {
-                    this.action = TriggerReceiver.ACTION_EXECUTE_TASK
-                    putExtra(TriggerReceiver.EXTRA_TASK_INSTRUCTION, trigger.instruction)
+            try {
+                val triggerManager = TriggerManager.getInstance(context)
+                val triggers = triggerManager.getTriggers()
+                val matchingTriggers = triggers.filter {
+                    it.isEnabled && it.type == TriggerType.CHARGING_STATE && it.chargingStatus == status
                 }
-                context.sendBroadcast(executeIntent)
+
+                Log.d(TAG, "Found ${matchingTriggers.size} matching triggers for status '$status'")
+
+                matchingTriggers.forEach { trigger ->
+                    Log.d(TAG, "Executing trigger: ${trigger.id} - ${trigger.instruction}")
+                    val executeIntent = Intent(context, TriggerReceiver::class.java).apply {
+                        this.action = TriggerReceiver.ACTION_EXECUTE_TASK
+                        putExtra(TriggerReceiver.EXTRA_TASK_INSTRUCTION, trigger.instruction)
+                    }
+                    context.sendBroadcast(executeIntent)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error handling charging state trigger", e)
+            } finally {
+                pendingResult.finish()
             }
         }
     }

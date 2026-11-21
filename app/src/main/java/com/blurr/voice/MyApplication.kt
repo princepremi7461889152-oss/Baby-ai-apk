@@ -125,7 +125,7 @@ class MyApplication : Application(), PurchasesUpdatedListener {
 
     override fun onPurchasesUpdated(billingResult: BillingResult, purchases: MutableList<Purchase>?) {
         Logger.d("MyApplication", "Purchase update received")
-        val intent = Intent("com.blurr.voice.PURCHASE_UPDATED")
+        val intent = Intent("com.blurr.voice.PURCHASE_UPDATED").setPackage(packageName)
         intent.putExtra("response_code", billingResult.responseCode)
         intent.putExtra("debug_message", billingResult.debugMessage)
         appContext.sendBroadcast(intent)

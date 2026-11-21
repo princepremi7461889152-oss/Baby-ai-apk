@@ -95,7 +95,14 @@ class TriggerManager(private val context: Context) {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val nextTriggerTime = getNextTriggerTime(trigger.hour!!, trigger.minute!!, trigger.daysOfWeek)
+        val hour = trigger.hour
+        val minute = trigger.minute
+        if (hour == null || minute == null) {
+            android.util.Log.w("TriggerManager", "Missing hour/minute for trigger: ${trigger.id}")
+            return
+        }
+
+        val nextTriggerTime = getNextTriggerTime(hour, minute, trigger.daysOfWeek)
         if (nextTriggerTime == null) {
             android.util.Log.w("TriggerManager", "No valid day of week for trigger: ${trigger.id}")
             return
@@ -103,15 +110,27 @@ class TriggerManager(private val context: Context) {
 
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
             if (alarmManager.canScheduleExactAlarms()) {
-                alarmManager.setExactAndAllowWhileIdle(
+                try {
+                    alarmManager.setExactAndAllowWhileIdle(
+                        AlarmManager.RTC_WAKEUP,
+                        nextTriggerTime.timeInMillis,
+                        pendingIntent
+                    )
+                } catch (e: SecurityException) {
+                    android.util.Log.w("TriggerManager", "Exact alarm security exception, falling back to inexact.", e)
+                    alarmManager.setAndAllowWhileIdle(
+                        AlarmManager.RTC_WAKEUP,
+                        nextTriggerTime.timeInMillis,
+                        pendingIntent
+                    )
+                }
+            } else {
+                android.util.Log.w("TriggerManager", "Cannot schedule exact alarm, falling back to inexact alarm.")
+                alarmManager.setAndAllowWhileIdle(
                     AlarmManager.RTC_WAKEUP,
                     nextTriggerTime.timeInMillis,
                     pendingIntent
                 )
-            } else {
-                // Handle case where permission is not granted.
-                // For now, we'll log a warning. The UI part of the plan will handle prompting the user.
-                android.util.Log.w("TriggerManager", "Cannot schedule exact alarm, permission not granted.")
             }
         } else {
             alarmManager.setExactAndAllowWhileIdle(

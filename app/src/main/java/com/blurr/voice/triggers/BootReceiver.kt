@@ -4,6 +4,8 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.util.Log
+import androidx.core.content.ContextCompat
+import com.blurr.voice.triggers.ui.TriggersActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -16,22 +18,33 @@ class BootReceiver : BroadcastReceiver() {
         if (intent.action == Intent.ACTION_BOOT_COMPLETED) {
             Log.d(TAG, "Device boot completed. Rescheduling alarms.")
             val triggerManager = TriggerManager.getInstance(context)
+            val prefs = context.getSharedPreferences(TriggersActivity.PREFS_NAME, Context.MODE_PRIVATE)
+            val triggersEnabled = prefs.getBoolean(TriggersActivity.KEY_TRIGGERS_ENABLED, false)
 
-            // It's good practice to do this work off the main thread
-            // Start the TriggerMonitoringService
-            val serviceIntent = Intent(context, TriggerMonitoringService::class.java)
-            context.startService(serviceIntent)
-            Log.d(TAG, "Started TriggerMonitoringService on boot.")
-
-            CoroutineScope(Dispatchers.IO).launch {
-                val triggers = triggerManager.getTriggers()
-                val scheduledTriggers = triggers.filter { it.isEnabled && it.type == TriggerType.SCHEDULED_TIME }
-                scheduledTriggers.forEach { trigger ->
-                    // In the future, we might have different logic for rescheduling
-                    // but for now, just calling schedule is fine as it will recreate the alarm.
-                    triggerManager.updateTrigger(trigger)
+            if (triggersEnabled) {
+                val serviceIntent = Intent(context, TriggerMonitoringService::class.java)
+                try {
+                    ContextCompat.startForegroundService(context, serviceIntent)
+                    Log.d(TAG, "Started TriggerMonitoringService on boot.")
+                } catch (e: Exception) {
+                    Log.w(TAG, "Unable to start TriggerMonitoringService on boot: ${e.message}")
                 }
-                Log.d(TAG, "Finished rescheduling ${scheduledTriggers.size} alarms.")
+            }
+
+            val pendingResult = goAsync()
+            CoroutineScope(Dispatchers.IO).launch {
+                try {
+                    val triggers = triggerManager.getTriggers()
+                    val scheduledTriggers = triggers.filter { it.isEnabled && it.type == TriggerType.SCHEDULED_TIME }
+                    scheduledTriggers.forEach { trigger ->
+                        triggerManager.updateTrigger(trigger)
+                    }
+                    Log.d(TAG, "Finished rescheduling ${scheduledTriggers.size} alarms.")
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error rescheduling alarms on boot", e)
+                } finally {
+                    pendingResult.finish()
+                }
             }
         }
     }

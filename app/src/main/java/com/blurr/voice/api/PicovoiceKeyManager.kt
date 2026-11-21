@@ -78,6 +78,13 @@ class PicovoiceKeyManager(private val context: Context) {
      */
     private suspend fun fetchAccessKeyFromApi(): String? = withContext(Dispatchers.IO) {
         try {
+            if (API_URL.isBlank() || API_URL.startsWith("your_") || !API_URL.startsWith("http") ||
+                API_KEY_VALUE.isBlank() || API_KEY_VALUE.startsWith("your_")
+            ) {
+                Log.w(TAG, "Picovoice gateway URL/key is not configured. Skipping remote key fetch.")
+                return@withContext null
+            }
+
             // Network check
             val isOnline = try {
                 NetworkConnectivityManager(context).isNetworkAvailable()
@@ -92,9 +99,9 @@ class PicovoiceKeyManager(private val context: Context) {
 
             var userEmail = UserProfileManager(context).getEmail()
 
-            if(userEmail==null){
+            if (userEmail == null) {
                 userEmail = UserIdManager(context).getOrCreateUserId()
-                Log.d(TAG,userEmail)
+                Log.d(TAG, userEmail)
             }
             val request = Request.Builder()
                 .url(API_URL)

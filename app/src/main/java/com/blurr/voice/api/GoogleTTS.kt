@@ -72,16 +72,15 @@ object GoogleTts {
      * @throws Exception if the API call fails or the response is invalid.
      */
     suspend fun synthesize(text: String, voice: TTSVoice): ByteArray = withContext(Dispatchers.IO) {
-        if (apiKey.isEmpty()) {
+        if (apiKey.isBlank() || apiKey.startsWith("your_")) {
             throw Exception("Google TTS API key is not configured.")
         }
-        println(voice.displayName)
 
         // Network check
         val isOnline = try {
-            true
+            NetworkConnectivityManager(MyApplication.appContext).isNetworkAvailable()
         } catch (e: Exception) {
-            Log.e("GoogleTts", "Network check failed, assuming offline. ${'$'}{e.message}")
+            Log.e("GoogleTts", "Network check failed, assuming offline. ${e.message}")
             false
         }
         if (!isOnline) {

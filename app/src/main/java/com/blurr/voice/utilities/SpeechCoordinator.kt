@@ -183,8 +183,14 @@ class SpeechCoordinator private constructor(private val context: Context) {
 
                 isListening = true
                 sttManager.startListening(
-                    onResult = { result -> onResult(result) },
-                    onError = { error -> onError(error) },
+                    onResult = { result ->
+                        isListening = false
+                        onResult(result)
+                    },
+                    onError = { error ->
+                        isListening = false
+                        onError(error)
+                    },
                     onListeningStateChange = { listening ->
                         isListening = listening
                         onListeningStateChange(listening)

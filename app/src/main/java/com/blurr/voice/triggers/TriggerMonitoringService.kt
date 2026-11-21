@@ -11,6 +11,7 @@ import android.os.Build
 import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import com.blurr.voice.MainActivity
 import com.blurr.voice.R
 
@@ -36,7 +37,7 @@ class TriggerMonitoringService : Service() {
         val pendingIntent = PendingIntent.getActivity(this, 0, notificationIntent, PendingIntent.FLAG_IMMUTABLE)
 
         val notification: Notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Blurr Trigger Service")
+            .setContentTitle("Baby Trigger Service")
             .setContentText("Monitoring for app triggers in the background.")
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentIntent(pendingIntent)
@@ -50,7 +51,11 @@ class TriggerMonitoringService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         Log.d(TAG, "Service onDestroy")
-        unregisterReceiver(chargingStateReceiver)
+        try {
+            unregisterReceiver(chargingStateReceiver)
+        } catch (e: IllegalArgumentException) {
+            Log.w(TAG, "ChargingStateReceiver was not registered")
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder? {
@@ -74,7 +79,12 @@ class TriggerMonitoringService : Service() {
             addAction(Intent.ACTION_POWER_CONNECTED)
             addAction(Intent.ACTION_POWER_DISCONNECTED)
         }
-        registerReceiver(chargingStateReceiver, intentFilter)
+        ContextCompat.registerReceiver(
+            this,
+            chargingStateReceiver,
+            intentFilter,
+            ContextCompat.RECEIVER_EXPORTED
+        )
         Log.d(TAG, "ChargingStateReceiver registered")
     }
 }

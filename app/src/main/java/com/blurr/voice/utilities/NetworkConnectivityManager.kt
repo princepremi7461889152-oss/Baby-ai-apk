@@ -34,13 +34,9 @@ class NetworkConnectivityManager(private val context: Context) {
      * @return true if internet is available, false otherwise
      */
     suspend fun isNetworkAvailable(): Boolean = withContext(Dispatchers.IO) {
-        val sc = SpeechCoordinator.getInstance(context)
-
         try {
-
             // First check if network is connected
             if (!isNetworkConnected()) {
-                sc.speakText("Network is not connected")
                 Log.d(TAG, "Network is not connected")
                 return@withContext false
             }
@@ -48,7 +44,6 @@ class NetworkConnectivityManager(private val context: Context) {
             // Then check if internet is actually accessible
             return@withContext checkInternetConnectivity()
         } catch (e: Exception) {
-            sc.speakText("Network is not connected")
             Log.e(TAG, "Error checking network availability", e)
             return@withContext false
         }

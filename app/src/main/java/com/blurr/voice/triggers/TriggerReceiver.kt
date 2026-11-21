@@ -5,6 +5,8 @@ import android.content.Context
 import android.content.Intent
 import android.util.Log
 import com.blurr.voice.v2.AgentService
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import java.util.concurrent.ConcurrentHashMap
 
@@ -51,16 +53,23 @@ class TriggerReceiver : BroadcastReceiver() {
             // Directly start the v2 AgentService
             AgentService.start(context, taskInstruction)
 
-            // Reschedule the alarm for the next day
-            val triggerId = intent.getStringExtra(EXTRA_TRIGGER_ID)
-            if (triggerId != null) {
-                kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                    TriggerManager.getInstance(context).rescheduleTrigger(triggerId)
-                }
-            }
-
             // Clean up old entries from the cache
             cleanupRecentTasks(currentTime)
+
+            // Reschedule the alarm for the next occurrence
+            val triggerId = intent.getStringExtra(EXTRA_TRIGGER_ID)
+            if (triggerId != null) {
+                val pendingResult = goAsync()
+                CoroutineScope(Dispatchers.IO).launch {
+                    try {
+                        TriggerManager.getInstance(context).rescheduleTrigger(triggerId)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error rescheduling trigger $triggerId", e)
+                    } finally {
+                        pendingResult.finish()
+                    }
+                }
+            }
         }
     }
 

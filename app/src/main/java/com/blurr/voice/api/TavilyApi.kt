@@ -19,16 +19,20 @@ class TavilyApi(private val apiKey: String) {
     // The search function now accepts the full JSON payload
     suspend fun search(searchParameters: JSONObject): String {
         return withContext(Dispatchers.IO) {
+            if (apiKey.isBlank() || apiKey.startsWith("your_")) {
+                Log.w("TavilyApi", "Tavily API key is not configured.")
+                return@withContext "{\"error\":\"Tavily API key not configured\"}"
+            }
             // Network check
-            try {
-                val isOnline = true
-                if (!isOnline) {
-                    Log.e("TavilyApi", "No internet connection. Skipping search call.")
-                    NetworkNotifier.notifyOffline()
-                    return@withContext "{\"error\":\"offline\"}"
-                }
+            val isOnline = try {
+                NetworkConnectivityManager(MyApplication.appContext).isNetworkAvailable()
             } catch (e: Exception) {
-                Log.e("TavilyApi", "Network check failed, assuming offline. ${'$'}{e.message}")
+                Log.e("TavilyApi", "Network check failed, assuming offline. ${e.message}")
+                false
+            }
+            if (!isOnline) {
+                Log.e("TavilyApi", "No internet connection. Skipping search call.")
+                NetworkNotifier.notifyOffline()
                 return@withContext "{\"error\":\"offline\"}"
             }
             val request = Request.Builder()

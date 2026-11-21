@@ -25,10 +25,10 @@ class TtsVisualizer(
 
                         // Calculate amplitude from the waveform data
                         var maxAmplitude = 0.0
-                        for (i in waveform.indices step 2) {
+                        for (i in 0 until waveform.size - 1 step 2) {
                             // Combine two bytes to form a 16-bit sample
-                            val sample = (waveform[i+1].toInt() shl 8) or (waveform[i].toInt() and 0xFF)
-                            if(sample > maxAmplitude) {
+                            val sample = (waveform[i + 1].toInt() shl 8) or (waveform[i].toInt() and 0xFF)
+                            if (sample > maxAmplitude) {
                                 maxAmplitude = sample.toDouble()
                             }
                         }
@@ -50,8 +50,16 @@ class TtsVisualizer(
 
     fun stop() {
         Log.d("TtsVisualizer", "Stopping visualization.")
-        visualizer?.enabled = false
-        visualizer?.release()
+        try {
+            visualizer?.enabled = false
+        } catch (e: Exception) {
+            Log.w("TtsVisualizer", "Error disabling visualizer", e)
+        }
+        try {
+            visualizer?.release()
+        } catch (e: Exception) {
+            Log.w("TtsVisualizer", "Error releasing visualizer", e)
+        }
         visualizer = null
         // Reset amplitude to 0 when stopped
         onAmplitudeChanged(0f)

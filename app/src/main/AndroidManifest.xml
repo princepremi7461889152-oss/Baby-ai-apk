@@ -178,13 +178,21 @@
         <service
             android:name=".v2.AgentService"
             android:exported="false"
-            android:foregroundServiceType="specialUse" />
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="AI accessibility automation task execution" />
+        </service>
 
         <service
             android:name=".triggers.TriggerMonitoringService"
             android:enabled="true"
             android:exported="false"
-            android:foregroundServiceType="specialUse" />
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="User-configured automation trigger monitoring" />
+        </service>
 
         <service
             android:name=".services.EnhancedWakeWordService"

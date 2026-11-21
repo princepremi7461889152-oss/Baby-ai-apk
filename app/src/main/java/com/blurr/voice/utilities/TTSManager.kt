@@ -41,6 +41,7 @@ class TTSManager private constructor(private val context: Context) : TextToSpeec
 
     private var audioTrack: AudioTrack? = null
     private var googleTtsPlaybackDeferred: CompletableDeferred<Unit>? = null
+    private var nativeTtsPlaybackDeferred: CompletableDeferred<Unit>? = null
 
     var utteranceListener: ((isSpeaking: Boolean) -> Unit)? = null
 
@@ -277,9 +278,11 @@ class TTSManager private constructor(private val context: Context) : TextToSpeec
             nativeTts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                 override fun onStart(utteranceId: String?) { utteranceListener?.invoke(true) }
                 override fun onDone(utteranceId: String?) {
+                    nativeTtsPlaybackDeferred?.complete(Unit)
                     utteranceListener?.invoke(false)
                 }
                 override fun onError(utteranceId: String?) {
+                    nativeTtsPlaybackDeferred?.complete(Unit)
                     utteranceListener?.invoke(false)
                 }
             })
@@ -292,9 +295,22 @@ class TTSManager private constructor(private val context: Context) : TextToSpeec
     // --- NEW PUBLIC FUNCTION TO STOP PLAYBACK ---
     fun stop() {
         // Stop the AudioTrack if it's currently playing
-        if (audioTrack?.playState == AudioTrack.PLAYSTATE_PLAYING) {
-            audioTrack?.stop()
-            audioTrack?.flush() // Clear any buffered data
+        try {
+            if (audioTrack?.playState == AudioTrack.PLAYSTATE_PLAYING) {
+                audioTrack?.stop()
+                audioTrack?.flush() // Clear any buffered data
+            }
+        } catch (e: IllegalStateException) {
+            Log.w("TTSManager", "AudioTrack stop failed: ${e.message}")
+        }
+        // Stop native TTS if active
+        try {
+            nativeTts?.stop()
+        } catch (e: Exception) {
+            Log.w("TTSManager", "Native TTS stop failed: ${e.message}")
+        }
+        if (nativeTtsPlaybackDeferred?.isActive == true) {
+            nativeTtsPlaybackDeferred?.complete(Unit)
         }
         // Immediately cancel any coroutine that is awaiting playback completion
         if (googleTtsPlaybackDeferred?.isActive == true) {
@@ -333,28 +349,50 @@ class TTSManager private constructor(private val context: Context) : TextToSpeec
         } catch (e: Exception) {
             if (e is CancellationException) throw e // Re-throw cancellation to stop execution
             Log.e("TTSManager", "Google TTS failed: ${e.message}. Falling back to native engine.")
-            isNativeTtsInitialized.await()
-            nativeTts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, this.hashCode().toString())
+            speakWithNativeTts(text)
         }
     }
-    
+
+    private suspend fun speakWithNativeTts(text: String) {
+        try {
+            val initialized = withTimeoutOrNull(5_000L) {
+                isNativeTtsInitialized.await()
+                true
+            } ?: false
+            if (!initialized || nativeTts == null) {
+                Log.e("TTSManager", "Native TTS not ready within timeout.")
+                return
+            }
+            val deferred = CompletableDeferred<Unit>()
+            nativeTtsPlaybackDeferred = deferred
+            val utteranceId = "tts_${System.currentTimeMillis()}"
+            val result = nativeTts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
+            if (result == TextToSpeech.SUCCESS) {
+                withTimeoutOrNull(30_000L) {
+                    deferred.await()
+                }
+            } else {
+                Log.e("TTSManager", "Native TTS speak returned error code: $result")
+            }
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            Log.e("TTSManager", "Native TTS fallback error", e)
+        }
+    }
+
     /**
      * Smart queue-based playback that starts playing immediately while preloading in background
      */
     private suspend fun playWithSmartQueue(textChunks: List<String>, selectedVoice: TTSVoice) {
         val audioQueue = mutableListOf<Pair<String, ByteArray>>()
         val queueMutex = Any()
-        
-        // Start preloading the first chunk immediately
+
+        // Start preloading the first chunk immediately; let failures propagate to native TTS fallback
         val firstChunk = textChunks[0].trim()
-        val firstAudioData = getCachedAudio(firstChunk, selectedVoice) ?: try {
-            GoogleTts.synthesize(firstChunk, selectedVoice).also { audioData ->
+        val firstAudioData = getCachedAudio(firstChunk, selectedVoice)
+            ?: GoogleTts.synthesize(firstChunk, selectedVoice).also { audioData ->
                 cacheAudio(firstChunk, audioData, selectedVoice)
             }
-        } catch (e: Exception) {
-            Log.e("TTSManager", "Failed to synthesize first chunk: ${e.message}")
-            return
-        }
         
         // Add first chunk to queue and start playing
         synchronized(queueMutex) {
@@ -525,6 +563,7 @@ class TTSManager private constructor(private val context: Context) : TextToSpeec
      * Speaks a single chunk of text (used for single chunks or fallback)
      */
     private suspend fun speakChunk(chunk: String, selectedVoice: TTSVoice) {
+        var currentCaptionId = ""
         try {
             // Check cache first
             val audioData = getCachedAudio(chunk, selectedVoice) ?: GoogleTts.synthesize(chunk, selectedVoice).also { audioData ->
@@ -534,19 +573,13 @@ class TTSManager private constructor(private val context: Context) : TextToSpeec
             // This deferred will complete when onMarkerReached is called.
             googleTtsPlaybackDeferred = CompletableDeferred()
 
-            // Correctly signal start and wait for completion.
-
-            var currentCaptionId = ""
-
             withContext(Dispatchers.Main) {
                 currentCaptionId = OverlayDispatcher.show(
                     chunk,
                     OverlayPriority.CAPTION
                 )
                 utteranceListener?.invoke(true)
-
             }
-
 
             // Write and play audio on a background thread
             withContext(Dispatchers.IO) {
@@ -565,18 +598,14 @@ class TTSManager private constructor(private val context: Context) : TextToSpeec
             audioTrack?.stop()
             audioTrack?.flush()
 
-            withContext(Dispatchers.Main) {
-                OverlayDispatcher.dismiss(currentCaptionId)
-                utteranceListener?.invoke(false)
-            }
-
-
             Log.d("TTSManager", "Successfully played audio chunk: ${chunk.take(50)}...")
-
-        } catch (e: Exception) {
-            if (e is CancellationException) throw e
-            Log.e("TTSManager", "Failed to speak chunk: ${chunk.take(50)}... Error: ${e.message}")
-            // Continue with next chunk instead of falling back to native TTS for the entire text
+        } finally {
+            if (currentCaptionId.isNotEmpty()) {
+                withContext(Dispatchers.Main) {
+                    OverlayDispatcher.dismiss(currentCaptionId)
+                    utteranceListener?.invoke(false)
+                }
+            }
         }
     }
 

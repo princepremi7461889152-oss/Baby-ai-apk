@@ -27,20 +27,20 @@ class MemoryService {
      * Adds a new memory to Mem0 based on the user's instruction.
      */
     suspend fun addMemory(instruction: String, userId: String) {
-        if (apiKey.isEmpty()) {
+        if (apiKey.isBlank() || apiKey.startsWith("your_")) {
             Log.w("MemoryService", "Mem0 API key is not set. Skipping add memory.")
             return
         }
         // Network check
-        try {
-            val isOnline = true
-            if (!isOnline) {
-                Log.e("MemoryService", "No internet connection. Skipping addMemory call.")
-                NetworkNotifier.notifyOffline()
-                return
-            }
+        val isOnline = try {
+            NetworkConnectivityManager(MyApplication.appContext).isNetworkAvailable()
         } catch (e: Exception) {
-            Log.e("MemoryService", "Network check failed, assuming offline. ${'$'}{e.message}")
+            Log.e("MemoryService", "Network check failed, assuming offline. ${e.message}")
+            false
+        }
+        if (!isOnline) {
+            Log.e("MemoryService", "No internet connection. Skipping addMemory call.")
+            NetworkNotifier.notifyOffline()
             return
         }
         withContext(Dispatchers.IO) {
@@ -84,21 +84,21 @@ class MemoryService {
      * Searches for memories relevant to the current query for a specific user.
      */
     suspend fun searchMemory(query: String, userId: String): String {
-        if (apiKey.isEmpty()) {
+        if (apiKey.isBlank() || apiKey.startsWith("your_")) {
             Log.w("MemoryService", "Mem0 API key is not set. Skipping search.")
             return "No relevant memories found."
         }
         // Network check
-        try {
-            val isOnline = true
-            if (!isOnline) {
-                Log.e("MemoryService", "No internet connection. Skipping searchMemory call.")
-                NetworkNotifier.notifyOffline()
-                return "Could not retrieve memories due to no internet connection."
-            }
+        val isOnline = try {
+            NetworkConnectivityManager(MyApplication.appContext).isNetworkAvailable()
         } catch (e: Exception) {
-            Log.e("MemoryService", "Network check failed, assuming offline. ${'$'}{e.message}")
-            return "Could not retrieve memories due to connectivity check error."
+            Log.e("MemoryService", "Network check failed, assuming offline. ${e.message}")
+            false
+        }
+        if (!isOnline) {
+            Log.e("MemoryService", "No internet connection. Skipping searchMemory call.")
+            NetworkNotifier.notifyOffline()
+            return "Could not retrieve memories due to no internet connection."
         }
 
         return withContext(Dispatchers.IO) {
