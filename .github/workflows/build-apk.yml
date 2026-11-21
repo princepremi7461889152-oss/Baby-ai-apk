@@ -51,9 +51,10 @@ jobs:
           fi
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
         with:
-          packages: platform-tools
+          accept-android-sdk-licenses: "true"
+          packages: ""
 
       - name: Install Android SDK packages and accept licenses
         run: |
@@ -83,13 +84,13 @@ jobs:
             exit 1
           fi
 
-          yes | "$SDKMANAGER_BIN" --licenses >/dev/null 2>&1 || true
+          yes | "$SDKMANAGER_BIN" --sdk_root="$SDK_ROOT" --licenses >/dev/null 2>&1 || true
 
-          "$SDKMANAGER_BIN" --install "platform-tools" "build-tools;36.0.0" "platforms;android-36" || true
-          "$SDKMANAGER_BIN" --install "platforms;android-36.1" || \
-            "$SDKMANAGER_BIN" --channel=3 --install "platforms;android-36.1" || true
+          "$SDKMANAGER_BIN" --sdk_root="$SDK_ROOT" "platform-tools" "build-tools;36.0.0" "platforms;android-36" || true
+          "$SDKMANAGER_BIN" --sdk_root="$SDK_ROOT" "platforms;android-36.1" || \
+            "$SDKMANAGER_BIN" --sdk_root="$SDK_ROOT" --channel=3 "platforms;android-36.1" || true
 
-          yes | "$SDKMANAGER_BIN" --licenses >/dev/null 2>&1 || true
+          yes | "$SDKMANAGER_BIN" --sdk_root="$SDK_ROOT" --licenses >/dev/null 2>&1 || true
           ls -la "$SDK_ROOT/platforms" || true
 
       - name: Set up Gradle 9.3.1
@@ -260,7 +261,7 @@ jobs:
           RELEASE_TITLE="Debug APK Build #${GITHUB_RUN_NUMBER}"
 
           if [ "$RELEASE_OUTCOME" = "success" ]; then
-            RELEASE_URL="$(gh release view "$RELEASE_TAG" --json url --jq .url)"
+            RELEASE_URL="$(gh release view "$RELEASE_TAG" --json url --jq .url 2>/dev/null || echo "https://github.com/${GITHUB_REPOSITORY}/releases/tag/${RELEASE_TAG}")"
             DIRECT_APK_URL="https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/app-debug.apk"
 
             echo "Release Tag: $RELEASE_TAG"
