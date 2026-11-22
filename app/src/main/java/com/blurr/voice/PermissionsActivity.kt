@@ -33,6 +33,11 @@ class PermissionsActivity : AppCompatActivity() {
     private lateinit var grantOverlayButton: TextView
     private lateinit var grantAssistantButton: TextView
 
+    private val requestAssistantRoleLauncher =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+            updatePermissionStatuses()
+        }
+
     // NEW: Add a permission launcher for the microphone
     private val requestPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted: Boolean ->
@@ -97,12 +102,24 @@ class PermissionsActivity : AppCompatActivity() {
 
         grantAssistantButton.setOnClickListener {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                val roleManager = getSystemService(ROLE_SERVICE) as RoleManager
-                val intent = roleManager.createRequestRoleIntent(RoleManager.ROLE_ASSISTANT)
-                startActivityForResult(intent, 123)
+                val roleManager = getSystemService(RoleManager::class.java)
+                if (roleManager != null && roleManager.isRoleAvailable(RoleManager.ROLE_ASSISTANT)) {
+                    try {
+                        requestAssistantRoleLauncher.launch(roleManager.createRequestRoleIntent(RoleManager.ROLE_ASSISTANT))
+                        return@setOnClickListener
+                    } catch (_: Exception) {
+                    }
+                }
+            }
+            val fallbackIntents = listOf(
+                Intent(Settings.ACTION_VOICE_INPUT_SETTINGS),
+                Intent(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS)
+            )
+            val resolved = fallbackIntents.firstOrNull { it.resolveActivity(packageManager) != null }
+            if (resolved != null) {
+                startActivity(resolved)
             } else {
-                val intent = Intent(Settings.ACTION_VOICE_INPUT_SETTINGS)
-                startActivity(intent)
+                Toast.makeText(this, "Assistant settings not available on this device.", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -185,7 +202,11 @@ class PermissionsActivity : AppCompatActivity() {
     // --- Helper functions to check each permission (no changes here) ---
 
     private fun isAccessibilityServiceEnabled(): Boolean {
+        if (AccessibilityServiceChecker(this).isAccessibilityServiceEnabled()) {
+            return true
+        }
         val service = packageName + "/" + ScreenInteractionService::class.java.canonicalName
+        val shortService = packageName + "/." + ScreenInteractionService::class.java.simpleName
         val accessibilityEnabled = Settings.Secure.getInt(
             applicationContext.contentResolver,
             Settings.Secure.ACCESSIBILITY_ENABLED,
@@ -200,7 +221,8 @@ class PermissionsActivity : AppCompatActivity() {
                 val splitter = TextUtils.SimpleStringSplitter(':')
                 splitter.setString(settingValue)
                 while (splitter.hasNext()) {
-                    if (splitter.next().equals(service, ignoreCase = true)) {
+                    val entry = splitter.next()
+                    if (entry.equals(service, ignoreCase = true) || entry.equals(shortService, ignoreCase = true)) {
                         return true
                     }
                 }
@@ -225,12 +247,12 @@ class PermissionsActivity : AppCompatActivity() {
     }
 
     private fun isDefaultAssistant(): Boolean {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val roleManager = getSystemService(ROLE_SERVICE) as RoleManager
-            return roleManager.isRoleHeld(RoleManager.ROLE_ASSISTANT)
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val roleManager = getSystemService(RoleManager::class.java)
+            roleManager?.isRoleHeld(RoleManager.ROLE_ASSISTANT) == true
         } else {
             val assistant = Settings.Secure.getString(contentResolver, "voice_interaction_service")
-            return assistant != null && assistant.contains(packageName)
+            assistant != null && assistant.contains(packageName)
         }
     }
 }

@@ -108,8 +108,13 @@ class FloatingPandaButtonService : Service() {
     }
 
     private fun createFloatingView(): Button {
+        val horizontalPadding = (14 * resources.displayMetrics.density).toInt()
+        val verticalPadding = (10 * resources.displayMetrics.density).toInt()
         return Button(this).apply {
-            text = "Hey Panda"
+            text = "Hey Baby"
+            contentDescription = "Hey Baby quick activation"
+            minHeight = (48 * resources.displayMetrics.density).toInt()
+            setPadding(horizontalPadding, verticalPadding, horizontalPadding, verticalPadding)
             // Prevent text from being all caps for a softer look
             isAllCaps = false
             setTextColor(Color.WHITE)

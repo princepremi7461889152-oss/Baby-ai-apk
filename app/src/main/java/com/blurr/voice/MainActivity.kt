@@ -38,11 +38,13 @@ import com.blurr.voice.utilities.PandaState
 import com.blurr.voice.utilities.PandaStateManager
 import com.blurr.voice.utilities.DeltaStateColorMapper
 import com.blurr.voice.utilities.FirebaseProviders
+import com.blurr.voice.ecc.EccToolkitActivity
+import com.blurr.voice.openhands.OpenHandsActivity
+import com.blurr.voice.publicapis.PublicApisActivity
+import com.blurr.voice.utilities.GeminiKeyManager
 import com.blurr.voice.views.DeltaSymbolView
 import com.google.firebase.Firebase
 import com.google.firebase.FirebaseApp
-import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.auth.auth
 import com.google.firebase.remoteconfig.remoteConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -58,7 +60,6 @@ class MainActivity : BaseNavigationActivity() {
     private lateinit var userId: String
     private lateinit var permissionManager: PermissionManager
     private lateinit var wakeWordManager: WakeWordManager
-    private lateinit var auth: FirebaseAuth
     private lateinit var tasksLeftTag: View
     private lateinit var freemiumManager: FreemiumManager
     private lateinit var wakeWordHelpLink: TextView
@@ -123,24 +124,9 @@ class MainActivity : BaseNavigationActivity() {
 
         FirebaseProviders.configureAppCheck(this, intent)
 
-        if (FirebaseApp.getApps(this).isEmpty()) {
-            startActivity(Intent(this, LoginActivity::class.java))
-            finish()
-            return
-        }
-
-        auth = Firebase.auth
-        val currentUser = auth.currentUser
-        val profileManager = UserProfileManager(this)
-
-        if (currentUser == null || !profileManager.isProfileComplete()) {
-            startActivity(Intent(this, LoginActivity::class.java))
-            finish()
-            return
-        }
         onboardingManager = OnboardingManager(this)
         if (!onboardingManager.isOnboardingCompleted()) {
-            Logger.d("MainActivity", "User is logged in but onboarding not completed. Relaunching permissions stepper.")
+            Logger.d("MainActivity", "Onboarding not completed. Launching permissions stepper.")
             startActivity(Intent(this, OnboardingPermissionsActivity::class.java))
             finish()
             return
@@ -193,7 +179,9 @@ class MainActivity : BaseNavigationActivity() {
         wakeWordManager = WakeWordManager(this, requestPermissionLauncher)
         handler = Handler(Looper.getMainLooper())
         setupClickListeners()
-        showLoading(true)
+        if (!MyApplication.isBillingSettled.value) {
+            showLoading(true)
+        }
         performBillingCheck()
         
         lifecycleScope.launch {
@@ -246,13 +234,6 @@ class MainActivity : BaseNavigationActivity() {
 
     override fun onStart() {
         super.onStart()
-        if (auth.currentUser == null) {
-            startActivity(Intent(this, LoginActivity::class.java))
-            finish()
-            return
-        }
-        
-        showLoading(true)
         performBillingCheck()
     }
 
@@ -312,11 +293,7 @@ class MainActivity : BaseNavigationActivity() {
     }
 
     private fun requestLimitIncrease() {
-        val userEmail = auth.currentUser?.email
-        if (userEmail.isNullOrEmpty()) {
-            Toast.makeText(this, "Could not get your email. Please try again.", Toast.LENGTH_SHORT).show()
-            return
-        }
+        val userEmail = UserProfileManager(this).getEmail()?.takeIf { it.isNotBlank() } ?: "local-user"
 
         val recipient = "ayush0000ayush@gmail.com"
         val subject = "I am facing issue in"
@@ -382,9 +359,9 @@ class MainActivity : BaseNavigationActivity() {
     @SuppressLint("UnspecifiedRegisterReceiverFlag")
     override fun onResume() {
         super.onResume()
-        showLoading(true)
         performBillingCheck()
         displayDeveloperMessage()
+        updateDefaultAssistantButtonVisibility()
         updateDeltaVisuals(pandaStateManager.getCurrentState())
         updateUI()
         pandaStateManager.startMonitoring()
@@ -439,6 +416,9 @@ class MainActivity : BaseNavigationActivity() {
             "Open camera app",
             "Check weather forecast",
             "Open calculator",
+            "Explore Public APIs Directory",
+            "Open ECC Engineering Toolkit",
+            "Open OpenHands Workspace",
             "Surprise me"
         )
         
@@ -446,11 +426,23 @@ class MainActivity : BaseNavigationActivity() {
             .setTitle("Example Commands")
             .setItems(examples) { _, which ->
                 val selectedExample = examples[which]
-                if (selectedExample == "Surprise me"){
-                    AgentService.start(this, "play never gonna give you up on youtube")
-
+                when (selectedExample) {
+                    "Explore Public APIs Directory" -> {
+                        startActivity(Intent(this, PublicApisActivity::class.java))
+                    }
+                    "Open ECC Engineering Toolkit" -> {
+                        startActivity(Intent(this, EccToolkitActivity::class.java))
+                    }
+                    "Open OpenHands Workspace" -> {
+                        startActivity(Intent(this, OpenHandsActivity::class.java))
+                    }
+                    "Surprise me" -> {
+                        AgentService.start(this, "play never gonna give you up on youtube")
+                    }
+                    else -> {
+                        AgentService.start(this, selectedExample)
+                    }
                 }
-                AgentService.start(this, selectedExample)
             }
             .setNegativeButton("Cancel") { dialog, _ ->
                 dialog.dismiss()
@@ -458,7 +450,7 @@ class MainActivity : BaseNavigationActivity() {
             .show()
         
         dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setTextColor(
-            ContextCompat.getColor(this, R.color.black)
+            ContextCompat.getColor(this, R.color.white)
         )
     }
 
@@ -500,8 +492,10 @@ class MainActivity : BaseNavigationActivity() {
     private fun updateTaskCounter() {
         lifecycleScope.launch {
             val isUserSub = freemiumManager.isUserSubscribed()
-            if(isUserSub){
+            if (isUserSub) {
                 tasksLeftTag.visibility = View.GONE
+            } else {
+                tasksLeftTag.visibility = View.VISIBLE
             }
             val tasksLeft = freemiumManager.getTasksRemaining()
             tasksLeftText.text = "$tasksLeft tasks left"
@@ -556,6 +550,8 @@ class MainActivity : BaseNavigationActivity() {
             permissionsTag.visibility = View.VISIBLE
         } else {
             tvPermissionStatus.text = "Some permissions are missing. Tap below to manage."
+            tvPermissionStatus.visibility = View.VISIBLE
+            managePermissionsButton.visibility = View.VISIBLE
             tvPermissionStatus.setTextColor(Color.parseColor("#F44336")) // Red
             permissionsTag.visibility = View.GONE
         }
@@ -600,17 +596,17 @@ class MainActivity : BaseNavigationActivity() {
     }
 
     private suspend fun waitForBillingClientReady() {
-        return withContext(Dispatchers.IO) {
+        withContext(Dispatchers.IO) {
             var attempts = 0
-            val maxAttempts = 10
-            
-            while (!MyApplication.isBillingClientReady.value && attempts < maxAttempts) {
-                kotlinx.coroutines.delay(500)
+            val maxAttempts = 10 // up to 2.5s only if billing hasn't settled yet
+
+            while (!MyApplication.isBillingSettled.value && attempts < maxAttempts) {
+                kotlinx.coroutines.delay(250)
                 attempts++
             }
-            
+
             if (!MyApplication.isBillingClientReady.value) {
-                Logger.w("MainActivity", "Billing client not ready after waiting")
+                Logger.w("MainActivity", "Billing client unavailable or not ready (settled=${MyApplication.isBillingSettled.value})")
             }
         }
     }
@@ -690,13 +686,8 @@ class MainActivity : BaseNavigationActivity() {
 
 
     private suspend fun updateUserToPro() {
-        val uid = Firebase.auth.currentUser?.uid
-        if (uid == null) {
-            Logger.e("MainActivity", "Cannot update user to pro: user is not authenticated.")
-            withContext(Dispatchers.Main) {
-            }
-            return
-        }
+        if (FirebaseApp.getApps(this).isEmpty()) return
+        val uid = UserIdManager(this).getOrCreateUserId()
 
         withContext(Dispatchers.IO) {
             val db = FirebaseProviders.firestore(this@MainActivity)
@@ -716,6 +707,22 @@ class MainActivity : BaseNavigationActivity() {
     }
 
     private fun displayDeveloperMessage() {
+        val devMsgView = findViewById<TextView>(R.id.developer_message_textview)
+        if (!GeminiKeyManager(this).hasApiKey()) {
+            devMsgView?.apply {
+                text = "Add your Gemini API key in Settings to enable Gemini 3.8 Flash."
+                visibility = View.VISIBLE
+                setOnClickListener {
+                    startActivity(Intent(this@MainActivity, SettingsActivity::class.java))
+                }
+            }
+        } else {
+            devMsgView?.visibility = View.GONE
+        }
+
+        if (FirebaseApp.getApps(this).isEmpty()) {
+            return
+        }
         //lifecycleScope.launch {
             try {
                 // Check if message has been shown more than once
@@ -752,7 +759,7 @@ class MainActivity : BaseNavigationActivity() {
                                     }
                                     .show()
                                 dialog.getButton(AlertDialog.BUTTON_POSITIVE).setTextColor(
-                                    ContextCompat.getColor(this@MainActivity, R.color.black)
+                                    ContextCompat.getColor(this@MainActivity, R.color.white)
                                 )
                                 Log.d("MainActivity", "Developer message displayed from Remote Config.")
                             } else {

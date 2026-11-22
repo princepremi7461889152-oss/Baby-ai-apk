@@ -38,32 +38,30 @@ class RoleRequestActivity : AppCompatActivity() {
         if (launched) return
         launched = true
 
-        val rm = getSystemService(RoleManager::class.java)
         Log.d("RoleRequestActivity", explainAssistantEligibility())
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
-            rm?.isRoleAvailable(RoleManager.ROLE_ASSISTANT) == true &&
-            !rm.isRoleHeld(RoleManager.ROLE_ASSISTANT)
-        ) {
-            // Launch AFTER window is visible to avoid BadToken issues
-            window.decorView.post {
-                try {
-                    roleLauncher.launch(rm.createRequestRoleIntent(RoleManager.ROLE_ASSISTANT))
-                } catch (_: Exception) {
-                    openAssistantSettingsFallback()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val rm = getSystemService(RoleManager::class.java)
+            if (rm != null && rm.isRoleAvailable(RoleManager.ROLE_ASSISTANT) && !rm.isRoleHeld(RoleManager.ROLE_ASSISTANT)) {
+                window.decorView.post {
+                    try {
+                        roleLauncher.launch(rm.createRequestRoleIntent(RoleManager.ROLE_ASSISTANT))
+                    } catch (_: Exception) {
+                        openAssistantSettingsFallback()
+                        finish()
+                    }
                 }
+                return
             }
-        } else {
-            // Either role not available or already held — go to Settings (or just finish)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && rm?.isRoleHeld(RoleManager.ROLE_ASSISTANT) == true) {
+            if (rm?.isRoleHeld(RoleManager.ROLE_ASSISTANT) == true) {
                 Toast.makeText(this, "Already the default assistant.", Toast.LENGTH_SHORT).show()
                 finish()
-            } else {
-                openAssistantSettingsFallback()
-                // Don’t finish here; let user navigate back from Settings to MainActivity.
-                // If you prefer to auto-finish, add: finish()
+                return
             }
         }
+
+        openAssistantSettingsFallback()
+        finish()
     }
 
     private fun openAssistantSettingsFallback() {

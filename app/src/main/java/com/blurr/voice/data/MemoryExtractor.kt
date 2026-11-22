@@ -5,9 +5,10 @@ import android.util.Log
 import com.blurr.voice.api.GeminiApi
 import com.blurr.voice.api.TextPart
 import com.blurr.voice.utilities.FirebaseProviders
-import com.google.firebase.Firebase
+import com.blurr.voice.utilities.GeminiKeyManager
+import com.blurr.voice.utilities.UserIdManager
+import com.google.firebase.FirebaseApp
 import com.google.firebase.Timestamp
-import com.google.firebase.auth.auth
 import com.google.firebase.firestore.FieldValue
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -16,8 +17,8 @@ import kotlinx.coroutines.withContext
 import java.util.UUID
 
 /**
- * Extracts and stores memories from conversations using Firebase AI Logic (`GeminiApi`)
- * and saves them directly to the signed-in user's Firestore document.
+ * Extracts and stores memories from conversations using Gemini 3.8 Flash (`GeminiApi`),
+ * persisting them locally via [LocalUserDataStore] and optionally syncing to Firestore.
  */
 object MemoryExtractor {
 
@@ -52,11 +53,7 @@ object MemoryExtractor {
         conversationHistory: List<Pair<String, List<Any>>>,
         existingMemories: List<String> = emptyList()
     ) {
-        val currentUser = try {
-            Firebase.auth.currentUser
-        } catch (_: Exception) {
-            null
-        } ?: return
+        if (!GeminiKeyManager(context).hasApiKey()) return
 
         // Skip index 0 if it's the large system prompt; keep actual dialogue turns
         val dialogueTurns = if (conversationHistory.size > 1) {
@@ -89,28 +86,36 @@ object MemoryExtractor {
                 val memories = parseExtractedMemories(response)
                 if (memories.isEmpty()) return@withContext
 
-                val docRef = FirebaseProviders.firestore(context)
-                    .collection("users")
-                    .document(currentUser.uid)
+                val localUserId = UserIdManager(context).getOrCreateUserId()
+                val hasFirebase = FirebaseApp.getApps(context).isNotEmpty()
 
                 memories.take(5).forEach { memoryText ->
-                    val memoryMap = hashMapOf(
-                        "id" to UUID.randomUUID().toString(),
-                        "text" to memoryText.take(500),
-                        "source" to "Assistant",
-                        "createdAt" to Timestamp.now()
-                    )
-                    docRef.update("memories", FieldValue.arrayUnion(memoryMap)).await()
+                    val saved = LocalUserDataStore.addMemory(context, memoryText.take(500), source = "Assistant")
+                    if (hasFirebase) {
+                        try {
+                            val docRef = FirebaseProviders.firestore(context)
+                                .collection("users")
+                                .document(localUserId)
+                            val memoryMap = hashMapOf(
+                                "id" to saved.id.ifEmpty { UUID.randomUUID().toString() },
+                                "text" to saved.text,
+                                "source" to saved.source,
+                                "createdAt" to Timestamp.now()
+                            )
+                            docRef.update("memories", FieldValue.arrayUnion(memoryMap)).await()
+                        } catch (e: Exception) {
+                            FirebaseProviders.handleFirestoreError(
+                                e,
+                                FirebaseProviders.OperationType.UPDATE,
+                                "users/$localUserId"
+                            )
+                        }
+                    }
                 }
-                Log.d(TAG, "Saved ${memories.size} extracted memories to Firestore.")
+                Log.d(TAG, "Saved ${memories.size} extracted memories.")
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                FirebaseProviders.handleFirestoreError(
-                    e,
-                    FirebaseProviders.OperationType.UPDATE,
-                    "users/${currentUser.uid}"
-                )
                 Log.e(TAG, "Error during memory extraction", e)
             }
         }

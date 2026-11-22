@@ -57,6 +57,8 @@ object GoogleTts {
     private val client = OkHttpClient()
     private val API_URL = "https://texttospeech.googleapis.com/v1beta1/text:synthesize?key=$apiKey"
 
+    fun isConfigured(): Boolean = apiKey.isNotBlank() && !apiKey.startsWith("your_")
+
     /**
      * Synthesizes speech from text using the Google Cloud TTS API with default voice.
      * @param text The text to synthesize.

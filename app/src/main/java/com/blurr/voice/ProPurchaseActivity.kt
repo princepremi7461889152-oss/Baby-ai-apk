@@ -65,13 +65,13 @@ class ProPurchaseActivity : BaseNavigationActivity(), PurchasesUpdatedListener {
     private fun loadProductDetails() {
         lifecycleScope.launch {
             try {
-                // Wait for billing client to be ready
-                val isReady = withTimeoutOrNull(10000L) {
-                    MyApplication.isBillingClientReady.first { it }
-                }
-                
-                if (isReady != true) {
-                    showError("Unable to connect to Play Store. Please try again later.")
+                // Wait briefly for billing client initialization to settle
+                val settled = withTimeoutOrNull(3000L) {
+                    MyApplication.isBillingSettled.first { it }
+                } ?: false
+
+                if (!settled || !MyApplication.isBillingClientReady.value) {
+                    showError("Play Store Billing is unavailable on this device.")
                     return@launch
                 }
                 

@@ -138,16 +138,17 @@ class SpeechCoordinator private constructor(private val context: Context) {
                         isListening = false
                         delay(200)
                     }
-                    // 1. Synthesize audio with the specific voice HERE
+                    if (!GoogleTts.isConfigured()) {
+                        ttsManager.speakToUser(text)
+                        return@withLock
+                    }
                     val audioData = GoogleTts.synthesize(text, voice)
-
-                    // 2. Play the synthesized audio data
                     ttsManager.playAudioData(audioData)
-
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
-                    Log.e(TAG, "Error during voice test", e)
+                    Log.e(TAG, "Error during voice test, falling back to native TTS", e)
+                    ttsManager.speakToUser(text)
                 }
             }
         }

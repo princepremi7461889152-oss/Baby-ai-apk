@@ -71,8 +71,8 @@ class EnhancedWakeWordService : Service() {
 
         val engineName = if (usePorcupine) "Porcupine" else "STT"
         val notification: Notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Blurr Wake Word")
-            .setContentText("Listening for 'Panda' with Porcupine engine...")
+            .setContentTitle("Baby Wake Word")
+            .setContentText("Listening for 'Baby' with $engineName engine...")
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentIntent(pendingIntent)
             .build()

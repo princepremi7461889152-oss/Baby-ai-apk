@@ -120,7 +120,19 @@
     <string name="microphone_permission_not_granted">Microphone permission not granted</string>
     <string name="accessibility_permission_needed_for_task">Hey, accessibility permission is needed to execute any task. I know you might have doubt giving this permission to me, but my code is open source, so can always check it out if you have doubts.</string>
     <string name="get_your_free_accesskey_from_the_picovoice_console"><u>Get your free AccessKey from the Picovoice Console</u></string>
-    <string name="triggers_not_working_for_you"><u>Triggers not working for you?</u>u></string>
-    <string name="sign_out">Sign Out</string>
+    <string name="triggers_not_working_for_you"><u>Triggers not working for you?</u></string>
+    <string name="sign_out">Reset Local Settings</string>
     <string name="view_task_logs">View Past tasks Logs</string>
+    <string name="gemini_api_key_title">Gemini 3.8 Flash API Key</string>
+    <string name="gemini_api_key_desc">Enter your own Google Gemini API key to power Baby AI with gemini-3.8-flash. Your key is stored only on this device.</string>
+    <string name="get_gemini_api_key_link"><u>Get a free API key from Google AI Studio</u></string>
+    <string name="public_apis_title">Public APIs Directory</string>
+    <string name="public_apis_desc">Browse, search, test, and ask Gemini 3.8 Flash about free APIs from public-apis/public-apis.</string>
+    <string name="explore_public_apis">Explore Public APIs</string>
+    <string name="ecc_toolkit_title">ECC Agent Engineering Toolkit</string>
+    <string name="ecc_toolkit_desc">Run Plan → Test → Implement → Review → Verify workflows, specialized ECC agents, AgentShield security scans, project rules, and research-first docs powered by Gemini 3.8 Flash.</string>
+    <string name="open_ecc_toolkit">Open ECC Toolkit</string>
+    <string name="openhands_title">OpenHands Software Agent</string>
+    <string name="openhands_desc">Run CodeActAgent, ReadOnlyAgent, and BrowsingAgent in an isolated Event-Stream sandbox with microagents, file editing, and optional remote OpenHands server connectivity.</string>
+    <string name="open_openhands">Open OpenHands Workspace</string>
 </resources>

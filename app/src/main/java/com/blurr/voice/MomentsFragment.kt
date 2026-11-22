@@ -6,15 +6,16 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.LinearLayout
 import androidx.fragment.app.Fragment
+import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
-import androidx.lifecycle.lifecycleScope
+import com.blurr.voice.data.LocalUserDataStore
 import com.blurr.voice.data.TaskHistoryItem
 import com.blurr.voice.utilities.FirebaseProviders
 import com.blurr.voice.utilities.Logger
-import com.google.firebase.Firebase
+import com.blurr.voice.utilities.UserIdManager
+import com.google.firebase.FirebaseApp
 import com.google.firebase.Timestamp
-import com.google.firebase.auth.auth
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 
@@ -23,8 +24,9 @@ class MomentsFragment : Fragment() {
     private lateinit var recyclerView: RecyclerView
     private lateinit var emptyState: LinearLayout
     private lateinit var adapter: MomentsAdapter
+    private val isFirebaseConfigured: Boolean
+        get() = FirebaseApp.getApps(requireContext().applicationContext).isNotEmpty()
     private val db by lazy { FirebaseProviders.firestore(requireContext().applicationContext) }
-    private val auth by lazy { Firebase.auth }
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -37,32 +39,41 @@ class MomentsFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
-        // Initialize views
         recyclerView = view.findViewById(R.id.task_history_recycler_view)
         emptyState = view.findViewById(R.id.empty_state)
 
-        // Setup RecyclerView
         recyclerView.layoutManager = LinearLayoutManager(requireContext())
         adapter = MomentsAdapter(emptyList())
         recyclerView.adapter = adapter
 
-        // Load task history
         loadTaskHistory()
     }
 
+    override fun onResume() {
+        super.onResume()
+        if (::recyclerView.isInitialized) {
+            loadTaskHistory()
+        }
+    }
+
     private fun loadTaskHistory() {
-        val currentUser = auth.currentUser
-        if (currentUser == null) {
-            showEmptyState()
+        val localHistory = LocalUserDataStore.getTaskHistory(requireContext())
+        if (!isFirebaseConfigured) {
+            if (localHistory.isNotEmpty()) {
+                showTaskHistory(localHistory)
+            } else {
+                showEmptyState()
+            }
             return
         }
 
+        val localUserId = UserIdManager(requireContext()).getOrCreateUserId()
         viewLifecycleOwner.lifecycleScope.launch {
             try {
-                val document = db.collection("users").document(currentUser.uid).get().await()
+                val document = db.collection("users").document(localUserId).get().await()
                 if (document.exists()) {
                     val taskHistoryData = document.get("taskHistory") as? List<Map<String, Any>>
-                    if (taskHistoryData != null && taskHistoryData.isNotEmpty()) {
+                    if (!taskHistoryData.isNullOrEmpty()) {
                         val taskHistory = taskHistoryData.mapNotNull { taskData ->
                             try {
                                 TaskHistoryItem(
@@ -79,19 +90,22 @@ class MomentsFragment : Fragment() {
                             }
                         }
 
-                        // Sort by startedAt in descending order (most recent first)
-                        val sortedTaskHistory = taskHistory.sortedByDescending {
-                            it.startedAt?.toDate() ?: java.util.Date(0)
-                        }
+                        val sortedTaskHistory = (taskHistory + localHistory)
+                            .distinctBy { "${it.task}_${it.status}_${it.startedAt?.seconds}" }
+                            .sortedByDescending { it.startedAt?.toDate() ?: java.util.Date(0) }
 
                         if (sortedTaskHistory.isNotEmpty()) {
                             showTaskHistory(sortedTaskHistory)
                         } else {
                             showEmptyState()
                         }
+                    } else if (localHistory.isNotEmpty()) {
+                        showTaskHistory(localHistory)
                     } else {
                         showEmptyState()
                     }
+                } else if (localHistory.isNotEmpty()) {
+                    showTaskHistory(localHistory)
                 } else {
                     showEmptyState()
                 }
@@ -99,10 +113,14 @@ class MomentsFragment : Fragment() {
                 FirebaseProviders.handleFirestoreError(
                     e,
                     FirebaseProviders.OperationType.GET,
-                    "users/${currentUser.uid}"
+                    "users/$localUserId"
                 )
                 Logger.e("MomentsFragment", "Error loading task history", e)
-                showEmptyState()
+                if (localHistory.isNotEmpty()) {
+                    showTaskHistory(localHistory)
+                } else {
+                    showEmptyState()
+                }
             }
         }
     }

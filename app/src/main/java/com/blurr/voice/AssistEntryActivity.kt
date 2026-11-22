@@ -33,7 +33,7 @@ class AssistEntryActivity : Activity() {
             ContextCompat.startForegroundService(this, serviceIntent)
         } else {
             // e.g., tell the service to bring its overlay/mic UI to front
-            sendBroadcast(Intent("com.blurr.voice.ACTION_SHOW_OVERLAY"))
+            sendBroadcast(Intent("com.blurr.voice.ACTION_SHOW_OVERLAY").setPackage(packageName))
         }
     }
 }

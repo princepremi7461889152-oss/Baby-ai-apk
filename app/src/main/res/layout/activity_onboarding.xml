@@ -4,8 +4,7 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@drawable/bg_solid"
-    android:padding="28dp"
-    tools:context=".LoginActivity">
+    android:padding="28dp">
 
     <LinearLayout
         android:id="@+id/centerContainer"

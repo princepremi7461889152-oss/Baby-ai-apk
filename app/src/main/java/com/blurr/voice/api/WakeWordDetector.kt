@@ -58,7 +58,8 @@ class WakeWordDetector(
         sttManager?.startListening(
             onResult = { recognizedText ->
                 Log.d("WakeWordDetector", "Recognized: '$recognizedText'")
-                if (recognizedText.lowercase(Locale.ROOT).contains(wakeWord.lowercase(Locale.ROOT))) {
+                val lowerText = recognizedText.lowercase(Locale.ROOT)
+                if (lowerText.contains("baby") || lowerText.contains(wakeWord.lowercase(Locale.ROOT))) {
                     onWakeWordDetected()
                 }
                 restartListening()

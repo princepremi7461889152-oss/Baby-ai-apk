@@ -29,6 +29,7 @@ class DialogueActivity : AppCompatActivity() {
     private var answers: MutableList<String> = mutableListOf()
     private var currentQuestionIndex = 0
     private var originalInstruction: String = ""
+    private var consecutiveSttErrors = 0
 
     companion object {
         const val EXTRA_ORIGINAL_INSTRUCTION = "original_instruction"
@@ -136,10 +137,14 @@ class DialogueActivity : AppCompatActivity() {
                     answerInput.setText(recognizedText)
                     Toast.makeText(this, "Recognized: $recognizedText", Toast.LENGTH_SHORT).show()
 
+                    consecutiveSttErrors = 0
+                    val submittedForIndex = currentQuestionIndex
                     // Automatically submit the answer after a short delay
                     lifecycleScope.launch {
                         delay(1000) // Wait 1 second for user to see the recognized text
-                        submitAnswer(recognizedText)
+                        if (!isFinishing && !isDestroyed && currentQuestionIndex == submittedForIndex) {
+                            submitAnswer(recognizedText)
+                        }
                     }
                 }
             },
@@ -149,10 +154,14 @@ class DialogueActivity : AppCompatActivity() {
                     voiceInputButton.isPressed = false
                     Toast.makeText(this, "Error: $errorMessage", Toast.LENGTH_SHORT).show()
 
-                    // If there was an error, restart voice input after a delay
-                    lifecycleScope.launch {
-                        delay(2000)
-                        startVoiceInput()
+                    if (consecutiveSttErrors < 2 && !isFinishing && !isDestroyed) {
+                        consecutiveSttErrors++
+                        lifecycleScope.launch {
+                            delay(2000)
+                            if (!isFinishing && !isDestroyed) {
+                                startVoiceInput()
+                            }
+                        }
                     }
                 }
             },
@@ -193,7 +202,7 @@ class DialogueActivity : AppCompatActivity() {
                 
                 // Wait for TTS to complete, then start voice input automatically
                 delay(1000) // Wait 1 second after question is displayed
-                runOnUiThread {
+                if (!isFinishing && !isDestroyed && currentQuestionIndex == index) {
                     startVoiceInput()
                 }
             }
@@ -205,7 +214,9 @@ class DialogueActivity : AppCompatActivity() {
     }
 
     private fun submitAnswer(answer: String) {
+        if (answers.size > currentQuestionIndex) return
         answers.add(answer)
+        consecutiveSttErrors = 0
         
         // Move to next question
         val nextIndex = currentQuestionIndex + 1

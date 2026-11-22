@@ -1,0 +1,72 @@
+[
+  {
+    "id": "micro-android-kotlin",
+    "name": "Android & Kotlin Engineer",
+    "triggerKeywords": ["kotlin", "android", "compose", "gradle", "activity", "viewmodel", "xml"],
+    "description": "Enforces Jetpack Compose, MVVM StateFlow, Coroutine lifecycle safety, and 48dp accessibility targets.",
+    "instructions": "Follow modern Android Kotlin conventions: use viewModelScope/lifecycleScope instead of GlobalScope, protect shared state with StateFlow, ensure Compose minimumInteractiveComponentSize >= 48.dp, handle edge-to-edge WindowInsets, and avoid blocking UI threads.",
+    "sourcePath": ".openhands/microagents/android-kotlin.md",
+    "enabled": true,
+    "isCustom": false
+  },
+  {
+    "id": "micro-security-sandbox",
+    "name": "Sandbox & Secret Guard",
+    "triggerKeywords": ["security", "secret", "api", "key", "token", "auth", "sql", "password"],
+    "description": "Prevents hardcoded API keys, SQL concatenation, cleartext HTTP, and unsafe workspace escapes.",
+    "instructions": "Never hardcode API keys or tokens in code; always read Gemini API keys from GeminiKeyManager or environment secrets. Parameterize database queries, prefer HTTPS, and keep file edits strictly inside the sandbox workspace root.",
+    "sourcePath": ".openhands/microagents/security-sandbox.md",
+    "enabled": true,
+    "isCustom": false
+  },
+  {
+    "id": "micro-tdd-verifier",
+    "name": "Verification & Robolectric QA",
+    "triggerKeywords": ["test", "tdd", "verify", "robolectric", "junit", "bug", "error", "crash"],
+    "description": "Applies OpenHands verification-first discipline: reproduce, write targeted tests, fix root cause, re-verify.",
+    "instructions": "Before finishing any coding task, inspect edge cases, write or update unit/Robolectric tests, avoid sleeping/flaky assertions, and verify every modified file with syntax and security checks.",
+    "sourcePath": ".openhands/microagents/tdd-verifier.md",
+    "enabled": true,
+    "isCustom": false
+  },
+  {
+    "id": "micro-api-connector",
+    "name": "REST & Public API Integrator",
+    "triggerKeywords": ["rest", "http", "json", "endpoint", "okhttp", "fetch", "public-apis"],
+    "description": "Guides resilient OkHttp/kotlinx.serialization network clients with timeouts and offline fallbacks.",
+    "instructions": "Use OkHttp with explicit connect/read timeouts, kotlinx.serialization with ignoreUnknownKeys=true, proper HTTP error handling, and graceful offline fallbacks when network or API keys are unavailable.",
+    "sourcePath": ".openhands/microagents/api-connector.md",
+    "enabled": true,
+    "isCustom": false
+  },
+  {
+    "id": "micro-repo-explorer",
+    "name": "Repo Architecture Explorer",
+    "triggerKeywords": ["read", "explore", "find", "grep", "architecture", "structure", "plan"],
+    "description": "Guides ReadOnlyAgent & CodeActAgent to map files with list/grep before proposing edits.",
+    "instructions": "Start by running LIST_FILES and GREP to locate existing modules before writing new files. Preserve existing Baby AI features and UI entry points rather than duplicating or deleting modules.",
+    "sourcePath": ".openhands/microagents/repo-explorer.md",
+    "enabled": true,
+    "isCustom": false
+  },
+  {
+    "id": "micro-docs-browser",
+    "name": "Web & Docs Researcher",
+    "triggerKeywords": ["docs", "documentation", "browse", "url", "web", "guide", "sdk"],
+    "description": "Guides BrowsingAgent on fetching verified docs URLs and summarizing actionable patterns.",
+    "instructions": "Use BROWSE_URL on authoritative documentation or run `api <topic>` to search bundled Public APIs before assuming API signatures or payload formats.",
+    "sourcePath": ".openhands/microagents/docs-browser.md",
+    "enabled": true,
+    "isCustom": false
+  },
+  {
+    "id": "micro-runtime-server",
+    "name": "OpenHands Agent Server Ops",
+    "triggerKeywords": ["docker", "sandbox", "server", "runtime", "remote", "conversation", "container"],
+    "description": "Configures and troubleshoots remote OpenHands Agent Server REST connections and Docker runtimes.",
+    "instructions": "When working with a remote OpenHands Agent Server, verify `/api/options/config` health first, keep bearer tokens in local preferences only, and stream conversation events cleanly.",
+    "sourcePath": ".openhands/microagents/runtime-server.md",
+    "enabled": true,
+    "isCustom": false
+  }
+]

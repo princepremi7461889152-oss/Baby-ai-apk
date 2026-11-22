@@ -1,23 +1,25 @@
 package com.blurr.voice.utilities
 
-import java.util.concurrent.atomic.AtomicInteger
+import com.blurr.voice.MyApplication
 
 /**
- * Legacy helper retained safely for optional REST embedding utilities.
- * Primary Gemini inference uses Firebase AI Logic (App Check attested, no API key needed).
+ * Provides the user-configured Gemini API key from Settings for embedding and REST utilities.
  */
 object ApiKeyManager {
 
-    private val apiKeys: List<String> = emptyList()
-    private val currentIndex = AtomicInteger(0)
-
-    fun hasKeys(): Boolean = apiKeys.isNotEmpty()
+    fun hasKeys(): Boolean {
+        return try {
+            GeminiKeyManager(MyApplication.appContext).hasApiKey()
+        } catch (_: Exception) {
+            false
+        }
+    }
 
     fun getNextKey(): String {
-        if (apiKeys.isEmpty()) {
-            return ""
+        return try {
+            GeminiKeyManager(MyApplication.appContext).getApiKey().orEmpty()
+        } catch (_: Exception) {
+            ""
         }
-        val index = currentIndex.getAndIncrement() % apiKeys.size
-        return apiKeys[index]
     }
 }

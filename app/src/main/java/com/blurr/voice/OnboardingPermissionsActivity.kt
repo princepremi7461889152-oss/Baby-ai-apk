@@ -62,6 +62,11 @@ class OnboardingPermissionsActivity : AppCompatActivity() {
     private var isLaunchingRole = false
     private val accessibilityServiceChecker = AccessibilityServiceChecker(this)
     private var hasScheduledAdvance = false
+    private val advanceRunnable = Runnable {
+        if (!isFinishing && !isDestroyed) {
+            moveToNextStep()
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -269,9 +274,9 @@ class OnboardingPermissionsActivity : AppCompatActivity() {
 
         requestOverlayLauncher =
             registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
-                val isGranted = permissionSteps[currentStep].isGranted()
+                val step = permissionSteps.getOrNull(currentStep) ?: return@registerForActivityResult
+                val isGranted = step.isGranted()
                 if (isGranted) {
-                    // Permission granted, automatically move to next step after a short delay
                     Toast.makeText(this, "Permission granted!", Toast.LENGTH_SHORT).show()
                     scheduleAdvanceOnce()
                 } else {
@@ -298,11 +303,24 @@ class OnboardingPermissionsActivity : AppCompatActivity() {
             }
     }
     private fun scheduleAdvanceOnce(delayMs: Long = 0) {
-        if (hasScheduledAdvance) return
+        if (hasScheduledAdvance || isFinishing || isDestroyed) return
         hasScheduledAdvance = true
-        nextButton.postDelayed({
-            moveToNextStep()
-        }, delayMs)
+        nextButton.postDelayed(advanceRunnable, delayMs)
+    }
+
+    override fun onPause() {
+        super.onPause()
+        if (::nextButton.isInitialized) {
+            nextButton.removeCallbacks(advanceRunnable)
+        }
+        hasScheduledAdvance = false
+    }
+
+    override fun onDestroy() {
+        if (::nextButton.isInitialized) {
+            nextButton.removeCallbacks(advanceRunnable)
+        }
+        super.onDestroy()
     }
     private fun resetAssistantAskedFlag() {
         getSharedPreferences("assistant_prefs", MODE_PRIVATE)
@@ -359,7 +377,7 @@ class OnboardingPermissionsActivity : AppCompatActivity() {
     }
     private fun setupClickListeners() {
         grantButton.setOnClickListener {
-            permissionSteps[currentStep].action.invoke()
+            permissionSteps.getOrNull(currentStep)?.action?.invoke()
         }
 
         nextButton.setOnClickListener {

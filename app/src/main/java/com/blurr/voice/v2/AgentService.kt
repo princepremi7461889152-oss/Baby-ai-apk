@@ -26,9 +26,9 @@ import com.blurr.voice.v2.llm.GeminiApi
 import com.blurr.voice.v2.message_manager.MemoryManager
 import com.blurr.voice.v2.perception.Perception
 import com.blurr.voice.v2.perception.SemanticParser
-import com.google.firebase.Firebase
+import com.blurr.voice.data.LocalUserDataStore
+import com.blurr.voice.utilities.UserIdManager
 import com.google.firebase.Timestamp
-import com.google.firebase.auth.auth
 import com.google.firebase.firestore.FieldValue
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -67,8 +67,14 @@ class AgentService : Service() {
     private lateinit var overlayManager: OverlayManager
 
     // Firebase instances for task tracking
-    private val db by lazy { FirebaseProviders.firestore(this) }
-    private val auth by lazy { Firebase.auth }
+    private val db by lazy {
+        if (com.google.firebase.FirebaseApp.getApps(this).isNotEmpty()) {
+            FirebaseProviders.firestore(this)
+        } else {
+            null
+        }
+    }
+    private val localUserId by lazy { UserIdManager(this).getOrCreateUserId() }
 
     companion object {
         private const val NOTIFICATION_CHANNEL_ID = "AgentServiceChannelV2"
@@ -288,11 +294,8 @@ class AgentService : Service() {
      * This method is inspired by FreemiumManager's Firebase operations.
      */
     private suspend fun trackTaskInFirebase(task: String) {
-        val currentUser = auth.currentUser
-        if (currentUser == null) {
-            Log.w(TAG, "Cannot track task, user is not logged in.")
-            return
-        }
+        LocalUserDataStore.recordTaskStart(this, task)
+        val firestoreDb = db ?: return
 
         try {
             val taskEntry = hashMapOf(
@@ -304,55 +307,44 @@ class AgentService : Service() {
                 "errorMessage" to null
             )
 
-            // Append the task to the user's taskHistory array
-            db.collection("users").document(currentUser.uid)
+            firestoreDb.collection("users").document(localUserId)
                 .update("taskHistory", FieldValue.arrayUnion(taskEntry))
                 .await()
 
-            Log.d(TAG, "Successfully tracked task start in Firebase for user ${currentUser.uid}: $task")
+            Log.d(TAG, "Successfully tracked task start in Firebase for user $localUserId: $task")
         } catch (e: Exception) {
             FirebaseProviders.handleFirestoreError(
                 e,
                 FirebaseProviders.OperationType.UPDATE,
-                "users/${currentUser.uid}"
+                "users/$localUserId"
             )
             Log.e(TAG, "Failed to track task in Firebase", e)
         }
     }
 
-    /**
-     * Updates the task completion status in Firebase.
-     * Since Firestore doesn't support updating array elements directly,
-     * we'll add a new completion entry to track the result.
-     */
     private suspend fun trackTaskCompletion(task: String, success: Boolean, errorMessage: String? = null) {
-        val currentUser = auth.currentUser
-        if (currentUser == null) {
-            Log.w(TAG, "Cannot track task completion, user is not logged in.")
-            return
-        }
+        LocalUserDataStore.recordTaskCompletion(this, task, success, errorMessage)
+        val firestoreDb = db ?: return
 
         try {
             val completionEntry = hashMapOf(
                 "task" to task,
                 "status" to if (success) "completed" else "failed",
-//                "startedAt" to null, // This is a completion entry, not a start entry
                 "completedAt" to Timestamp.now(),
                 "success" to success,
                 "errorMessage" to errorMessage
             )
 
-            // Append the completion status to the user's taskHistory array
-            db.collection("users").document(currentUser.uid)
+            firestoreDb.collection("users").document(localUserId)
                 .update("taskHistory", FieldValue.arrayUnion(completionEntry))
                 .await()
 
-            Log.d(TAG, "Successfully tracked task completion in Firebase for user ${currentUser.uid}: $task (success: $success)")
+            Log.d(TAG, "Successfully tracked task completion in Firebase for user $localUserId: $task (success: $success)")
         } catch (e: Exception) {
             FirebaseProviders.handleFirestoreError(
                 e,
                 FirebaseProviders.OperationType.UPDATE,
-                "users/${currentUser.uid}"
+                "users/$localUserId"
             )
             Log.e(TAG, "Failed to track task completion in Firebase", e)
         }

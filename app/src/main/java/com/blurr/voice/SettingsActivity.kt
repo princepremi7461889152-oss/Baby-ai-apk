@@ -5,29 +5,29 @@ import android.content.Intent
 import android.content.SharedPreferences
 import android.net.Uri
 import android.os.Bundle
+import android.text.Editable
+import android.text.TextWatcher
 import android.util.Log
 import android.widget.Button
+import android.widget.EditText
 import android.widget.NumberPicker
-import android.widget.RadioGroup
 import android.widget.TextView
 import android.widget.Toast
-import androidx.appcompat.app.AlertDialog
-import androidx.appcompat.app.AppCompatActivity
-import androidx.core.content.ContextCompat
-import androidx.core.content.edit
-import androidx.credentials.ClearCredentialStateRequest
-import androidx.credentials.CredentialManager
-import androidx.lifecycle.lifecycleScope
-import com.google.firebase.Firebase
-import com.google.firebase.auth.auth
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
 import com.blurr.voice.api.GoogleTts
 import com.blurr.voice.api.PicovoiceKeyManager
 import com.blurr.voice.api.TTSVoice
+import com.blurr.voice.ecc.EccToolkitActivity
+import com.blurr.voice.openhands.OpenHandsActivity
+import com.blurr.voice.publicapis.PublicApisActivity
+import com.blurr.voice.utilities.GeminiKeyManager
 import com.blurr.voice.utilities.SpeechCoordinator
-import com.blurr.voice.utilities.VoicePreferenceManager
 import com.blurr.voice.utilities.UserProfileManager
+import com.blurr.voice.utilities.VoicePreferenceManager
 import com.blurr.voice.utilities.WakeWordManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -43,15 +43,24 @@ class SettingsActivity : BaseNavigationActivity() {
     private lateinit var permissionsInfoButton: TextView
     private lateinit var batteryOptimizationHelpButton: TextView
     private lateinit var appVersionText: TextView
-    private lateinit var editUserName: android.widget.EditText
-    private lateinit var editUserEmail: android.widget.EditText
-    private lateinit var editWakeWordKey: android.widget.EditText
+    private lateinit var editUserName: EditText
+    private lateinit var editUserEmail: EditText
+    private lateinit var editWakeWordKey: EditText
     private lateinit var textGetPicovoiceKeyLink: TextView
     private lateinit var wakeWordButton: TextView
     private lateinit var buttonSignOut: Button
     private lateinit var wakeWordManager: WakeWordManager
     private lateinit var requestPermissionLauncher: ActivityResultLauncher<String>
 
+    private lateinit var editGeminiApiKey: EditText
+    private lateinit var textGeminiKeyStatus: TextView
+    private lateinit var textGetGeminiKeyLink: TextView
+    private lateinit var btnSaveGeminiKey: TextView
+    private lateinit var btnClearGeminiKey: Button
+    private lateinit var btnOpenPublicApis: TextView
+    private lateinit var btnOpenEccToolkit: TextView
+    private lateinit var btnOpenOpenHands: TextView
+    private lateinit var geminiKeyManager: GeminiKeyManager
 
     private lateinit var sc: SpeechCoordinator
     private lateinit var sharedPreferences: SharedPreferences
@@ -70,11 +79,9 @@ class SettingsActivity : BaseNavigationActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_settings)
 
-        // Initialize permission launcher first
         requestPermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted: Boolean ->
             if (isGranted) {
                 Toast.makeText(this, "Permission granted!", Toast.LENGTH_SHORT).show()
-                // The manager will handle the service start after permission is granted.
                 wakeWordManager.handleWakeWordButtonClick(wakeWordButton)
                 updateWakeWordButtonState()
             } else {
@@ -91,7 +98,6 @@ class SettingsActivity : BaseNavigationActivity() {
 
     override fun onStop() {
         super.onStop()
-        // Stop any lingering voice tests when the user leaves the screen
         sc.stop()
         voiceTestJob?.cancel()
     }
@@ -100,8 +106,8 @@ class SettingsActivity : BaseNavigationActivity() {
         sharedPreferences = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         sc = SpeechCoordinator.getInstance(this)
         availableVoices = GoogleTts.getAvailableVoices()
-        // Initialize wake word manager
         wakeWordManager = WakeWordManager(this, requestPermissionLauncher)
+        geminiKeyManager = GeminiKeyManager(this)
     }
 
     private fun setupUI() {
@@ -110,9 +116,18 @@ class SettingsActivity : BaseNavigationActivity() {
         permissionsInfoButton = findViewById(R.id.permissionsInfoButton)
         appVersionText = findViewById(R.id.appVersionText)
         batteryOptimizationHelpButton = findViewById(R.id.batteryOptimizationHelpButton)
-      
+
         editWakeWordKey = findViewById(R.id.editWakeWordKey)
         wakeWordButton = findViewById(R.id.wakeWordButton)
+
+        editGeminiApiKey = findViewById(R.id.editGeminiApiKey)
+        textGeminiKeyStatus = findViewById(R.id.textGeminiKeyStatus)
+        textGetGeminiKeyLink = findViewById(R.id.textGetGeminiKeyLink)
+        btnSaveGeminiKey = findViewById(R.id.btnSaveGeminiKey)
+        btnClearGeminiKey = findViewById(R.id.btnClearGeminiKey)
+        btnOpenPublicApis = findViewById(R.id.btnOpenPublicApis)
+        btnOpenEccToolkit = findViewById(R.id.btnOpenEccToolkit)
+        btnOpenOpenHands = findViewById(R.id.btnOpenOpenHands)
 
         buttonSignOut = findViewById(R.id.buttonSignOut)
 
@@ -120,18 +135,15 @@ class SettingsActivity : BaseNavigationActivity() {
         editUserEmail = findViewById(R.id.editUserEmail)
         textGetPicovoiceKeyLink = findViewById(R.id.textGetPicovoiceKeyLink)
 
-
         setupClickListeners()
         setupVoicePicker()
 
-        // Prefill profile fields from saved values
         kotlin.runCatching {
             val pm = UserProfileManager(this)
             editUserName.setText(pm.getName() ?: "")
             editUserEmail.setText(pm.getEmail() ?: "")
         }
 
-        // Show app version
         val versionName = BuildConfig.VERSION_NAME
         appVersionText.text = "Version $versionName"
     }
@@ -146,55 +158,84 @@ class SettingsActivity : BaseNavigationActivity() {
 
     private fun setupClickListeners() {
         permissionsInfoButton.setOnClickListener {
-            val intent = Intent(this, PermissionsActivity::class.java)
-            startActivity(intent)
+            startActivity(Intent(this, PermissionsActivity::class.java))
         }
         batteryOptimizationHelpButton.setOnClickListener {
             showBatteryOptimizationDialog()
         }
+
+        btnSaveGeminiKey.setOnClickListener {
+            val key = editGeminiApiKey.text.toString().trim()
+            if (key.isEmpty()) {
+                Toast.makeText(this, "Please enter a Gemini API key first.", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            geminiKeyManager.saveApiKey(key)
+            updateGeminiKeyStatus()
+            Toast.makeText(this, "Gemini 3.8 Flash API key saved.", Toast.LENGTH_SHORT).show()
+        }
+
+        btnClearGeminiKey.setOnClickListener {
+            geminiKeyManager.clearApiKey()
+            editGeminiApiKey.setText("")
+            updateGeminiKeyStatus()
+            Toast.makeText(this, "Gemini API key cleared.", Toast.LENGTH_SHORT).show()
+        }
+
+        textGetGeminiKeyLink.setOnClickListener {
+            openExternalUrl("https://aistudio.google.com/apikey")
+        }
+
+        btnOpenPublicApis.setOnClickListener {
+            startActivity(Intent(this, PublicApisActivity::class.java))
+        }
+
+        btnOpenEccToolkit.setOnClickListener {
+            startActivity(Intent(this, EccToolkitActivity::class.java))
+        }
+
+        btnOpenOpenHands.setOnClickListener {
+            startActivity(Intent(this, OpenHandsActivity::class.java))
+        }
+
         wakeWordButton.setOnClickListener {
             val keyManager = PicovoiceKeyManager(this)
-            
-            // Step 1: Save key if provided in the EditText
             val userKey = editWakeWordKey.text.toString().trim()
             if (userKey.isNotEmpty()) {
                 keyManager.saveUserProvidedKey(userKey)
                 Toast.makeText(this, "Wake word key saved.", Toast.LENGTH_SHORT).show()
             }
-            
-            // Step 2: Check if we have a key (either just saved or previously saved)
+
             val hasKey = !keyManager.getUserProvidedKey().isNullOrBlank()
-            
             if (!hasKey) {
                 showPicovoiceKeyRequiredDialog()
                 return@setOnClickListener
             }
-            
-            // Step 3: Enable the wake word
+
             wakeWordManager.handleWakeWordButtonClick(wakeWordButton)
-            // Give the service a moment to update its state before refreshing the UI
             android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ updateWakeWordButtonState() }, 500)
         }
+
         textGetPicovoiceKeyLink.setOnClickListener {
-            val url = "https://console.picovoice.ai/login"
-            val intent = Intent(Intent.ACTION_VIEW)
-            intent.data = Uri.parse(url)
-            try {
-                startActivity(intent)
-            } catch (e: Exception) {
-                // This might happen if the device has no web browser
-                Toast.makeText(this, "Could not open link. No browser found.", Toast.LENGTH_SHORT).show()
-                Log.e("SettingsActivity", "Failed to open Picovoice link", e)
-            }
+            openExternalUrl("https://console.picovoice.ai/login")
         }
 
-
         buttonSignOut.setOnClickListener {
-            showSignOutConfirmationDialog()
+            showResetSettingsConfirmationDialog()
         }
 
         findViewById<TextView>(R.id.viewTaskLogsButton).setOnClickListener {
             startActivity(Intent(this, TaskLogsListActivity::class.java))
+        }
+    }
+
+    private fun openExternalUrl(url: String) {
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+        try {
+            startActivity(intent)
+        } catch (e: Exception) {
+            Toast.makeText(this, "Could not open link. No browser found.", Toast.LENGTH_SHORT).show()
+            Log.e("SettingsActivity", "Failed to open external URL: $url", e)
         }
     }
 
@@ -209,9 +250,7 @@ class SettingsActivity : BaseNavigationActivity() {
                 voiceTestJob?.cancel()
                 voiceTestJob = lifecycleScope.launch {
                     delay(400L)
-                    // First, stop any currently playing voice
                     sc.stop()
-                    // Then, play the new sample
                     playVoiceSample(selectedVoice)
                 }
             }
@@ -224,6 +263,19 @@ class SettingsActivity : BaseNavigationActivity() {
         switchShowThoughts.setOnCheckedChangeListener { _, isChecked ->
             sharedPreferences.edit().putBoolean(KEY_SHOW_THOUGHTS, isChecked).apply()
         }
+
+        val profileWatcher = object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(s: Editable?) {
+                UserProfileManager(this@SettingsActivity).saveProfile(
+                    editUserName.text?.toString().orEmpty(),
+                    editUserEmail.text?.toString().orEmpty()
+                )
+            }
+        }
+        editUserName.addTextChangedListener(profileWatcher)
+        editUserEmail.addTextChangedListener(profileWatcher)
     }
 
     private fun playVoiceSample(voice: TTSVoice) {
@@ -235,10 +287,8 @@ class SettingsActivity : BaseNavigationActivity() {
                 if (voiceFile.exists()) {
                     val audioData = voiceFile.readBytes()
                     sc.playAudioData(audioData)
-                    Log.d("SettingsActivity", "Playing cached sample for ${voice.displayName}")
                 } else {
                     sc.testVoice(TEST_TEXT, voice)
-                    Log.d("SettingsActivity", "Synthesizing test for ${voice.displayName}")
                 }
             } catch (e: Exception) {
                 if (e !is CancellationException) {
@@ -250,6 +300,10 @@ class SettingsActivity : BaseNavigationActivity() {
     }
 
     private fun cacheVoiceSamples() {
+        if (!GoogleTts.isConfigured()) {
+            Log.d("SettingsActivity", "Google TTS API key not configured; skipping remote voice sample caching.")
+            return
+        }
         lifecycleScope.launch(Dispatchers.IO) {
             val cacheDir = File(cacheDir, "voice_samples")
             if (!cacheDir.exists()) cacheDir.mkdirs()
@@ -276,53 +330,46 @@ class SettingsActivity : BaseNavigationActivity() {
     }
 
     private fun loadAllSettings() {
-
-        // Inside loadAllSettings()
         val keyManager = PicovoiceKeyManager(this)
-        editWakeWordKey.setText(keyManager.getUserProvidedKey() ?: "") // You will create this method next
+        editWakeWordKey.setText(keyManager.getUserProvidedKey() ?: "")
+
+        editGeminiApiKey.setText(geminiKeyManager.getApiKey() ?: "")
+        updateGeminiKeyStatus()
+
         val savedVoiceName = sharedPreferences.getString(KEY_SELECTED_VOICE, DEFAULT_VOICE.name)
         val savedVoice = availableVoices.find { it.name == savedVoiceName } ?: DEFAULT_VOICE
         ttsVoicePicker.value = availableVoices.indexOf(savedVoice)
-        
-        // Update wake word button state
-        updateWakeWordButtonState()
 
+        updateWakeWordButtonState()
         switchShowThoughts.isChecked = sharedPreferences.getBoolean(KEY_SHOW_THOUGHTS, false)
+    }
+
+    private fun updateGeminiKeyStatus() {
+        if (geminiKeyManager.hasApiKey()) {
+            textGeminiKeyStatus.text = "Status: Configured (${geminiKeyManager.getMaskedKey()}) • Model: gemini-3.8-flash"
+            textGeminiKeyStatus.setTextColor(ContextCompat.getColor(this, R.color.accent))
+        } else {
+            textGeminiKeyStatus.text = "Status: Not configured • Model: gemini-3.8-flash"
+            textGeminiKeyStatus.setTextColor(ContextCompat.getColor(this, R.color.text_gray))
+        }
     }
 
     private fun saveSelectedVoice(voice: TTSVoice) {
         VoicePreferenceManager.saveSelectedVoice(this, voice)
-        Log.d("SettingsActivity", "Saved voice: ${voice.displayName}")
     }
 
     private fun showPicovoiceKeyRequiredDialog() {
         val dialog = AlertDialog.Builder(this)
             .setTitle("Picovoice Key Required")
-            .setMessage("To enable wake word functionality, you need a Picovoice AccessKey. You can get a free key from the Picovoice Console. Note: The Picovoice dashboard might not be available on mobile browsers sometimes - you may need to use a desktop browser.")
+            .setMessage("To enable wake word functionality, you need a Picovoice AccessKey. You can get a free key from the Picovoice Console.")
             .setPositiveButton("Get Key") { _, _ ->
-                // Try to open Picovoice console
-                val url = "https://console.picovoice.ai/login"
-                val intent = Intent(Intent.ACTION_VIEW)
-                intent.data = Uri.parse(url)
-                try {
-                    startActivity(intent)
-                } catch (e: Exception) {
-                    Toast.makeText(this, "Could not open link. No browser found or link unavailable on mobile. Please use a desktop browser.", Toast.LENGTH_LONG).show()
-                    Log.e("SettingsActivity", "Failed to open Picovoice link", e)
-                }
+                openExternalUrl("https://console.picovoice.ai/login")
             }
-            .setNegativeButton("Cancel") { dialog, _ ->
-                dialog.dismiss()
-            }
+            .setNegativeButton("Cancel") { d, _ -> d.dismiss() }
             .show()
-        
-        // Set button text colors to white
-        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setTextColor(
-            androidx.core.content.ContextCompat.getColor(this, R.color.white)
-        )
-        dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setTextColor(
-            androidx.core.content.ContextCompat.getColor(this, R.color.white)
-        )
+
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setTextColor(ContextCompat.getColor(this, R.color.white))
+        dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setTextColor(ContextCompat.getColor(this, R.color.white))
     }
 
     private fun updateWakeWordButtonState() {
@@ -334,69 +381,42 @@ class SettingsActivity : BaseNavigationActivity() {
             .setTitle(getString(R.string.battery_optimization_title))
             .setMessage(getString(R.string.battery_optimization_message))
             .setPositiveButton(getString(R.string.learn_how)) { _, _ ->
-                // Open the Tasker FAQ URL
-                val url = "https://tasker.joaoapps.com/userguide/en/faqs/faq-problem.html#00"
-                val intent = Intent(Intent.ACTION_VIEW)
-                intent.data = Uri.parse(url)
-                try {
-                    startActivity(intent)
-                } catch (e: Exception) {
-                    Toast.makeText(this, "Could not open link. No browser found.", Toast.LENGTH_LONG).show()
-                    Log.e("SettingsActivity", "Failed to open battery optimization link", e)
-                }
+                openExternalUrl("https://tasker.joaoapps.com/userguide/en/faqs/faq-problem.html#00")
             }
-            .setNegativeButton("Cancel") { dialog, _ ->
-                dialog.dismiss()
-            }
+            .setNegativeButton("Cancel") { d, _ -> d.dismiss() }
             .show()
-        
-        // Set button text colors to white
-        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setTextColor(
-            androidx.core.content.ContextCompat.getColor(this, R.color.white)
-        )
-        dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setTextColor(
-            androidx.core.content.ContextCompat.getColor(this, R.color.white)
-        )
+
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setTextColor(ContextCompat.getColor(this, R.color.white))
+        dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setTextColor(ContextCompat.getColor(this, R.color.white))
     }
 
-    private fun showSignOutConfirmationDialog() {
-        AlertDialog.Builder(this)
-            .setTitle("Sign Out")
-            .setMessage("Are you sure you want to sign out? This will clear all your settings and data.")
-            .setPositiveButton("Sign Out") { _, _ ->
-                signOut()
+    private fun showResetSettingsConfirmationDialog() {
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Reset Local Settings")
+            .setMessage("Are you sure you want to reset your local settings, profile, and saved Gemini API key?")
+            .setPositiveButton("Reset") { _, _ ->
+                resetLocalSettings()
             }
             .setNegativeButton("Cancel", null)
             .show()
+
+        val white = ContextCompat.getColor(this, R.color.white)
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.setTextColor(white)
+        dialog.getButton(AlertDialog.BUTTON_NEGATIVE)?.setTextColor(white)
     }
 
-    private fun signOut() {
-        lifecycleScope.launch {
-            try {
-                Firebase.auth.signOut()
-                CredentialManager.create(this@SettingsActivity)
-                    .clearCredentialState(ClearCredentialStateRequest())
-            } catch (e: Exception) {
-                Log.w("SettingsActivity", "Error clearing credential state during sign-out", e)
-            }
+    private fun resetLocalSettings() {
+        UserProfileManager(this).clearProfile()
+        geminiKeyManager.clearApiKey()
+        getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit().clear().apply()
 
-            // Clear User Profile
-            val userProfileManager = UserProfileManager(this@SettingsActivity)
-            userProfileManager.clearProfile()
-
-            // Clear all shared preferences for this app
-            getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit().clear().apply()
-
-            // Restart the app by navigating to the onboarding screen
-            val intent = Intent(this@SettingsActivity, LoginActivity::class.java)
-            intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
-            startActivity(intent)
-            finish()
-        }
+        val intent = Intent(this, MainActivity::class.java)
+        intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+        startActivity(intent)
+        finish()
     }
 
-    
     override fun getContentLayoutId(): Int = R.layout.activity_settings
-    
+
     override fun getCurrentNavItem(): BaseNavigationActivity.NavItem = BaseNavigationActivity.NavItem.SETTINGS
 }

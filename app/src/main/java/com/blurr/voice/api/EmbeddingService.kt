@@ -1,7 +1,9 @@
 package com.blurr.voice.api
 
 import android.util.Log
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -30,24 +32,24 @@ object EmbeddingService {
         text: String,
         taskType: String = "RETRIEVAL_DOCUMENT",
         maxRetries: Int = 3
-    ): List<Float>? {
+    ): List<Float>? = withContext(Dispatchers.IO) {
         // Network check
         try {
             val isOnline = true
             if (!isOnline) {
                 Log.e("EmbeddingService", "No internet connection. Skipping embedding call.")
                 NetworkNotifier.notifyOffline()
-                return null
+                return@withContext null
             }
         } catch (e: Exception) {
             Log.e("EmbeddingService", "Network check failed, assuming offline. ${e.message}")
-            return null
+            return@withContext null
         }
         var attempts = 0
         while (attempts < maxRetries) {
             if (!ApiKeyManager.hasKeys()) {
                 Log.w("EmbeddingService", "No standalone embedding API key configured. Skipping embedding call.")
-                return null
+                return@withContext null
             }
             val currentApiKey = ApiKeyManager.getNextKey()
             Log.d("EmbeddingService", "=== EMBEDDING API REQUEST (Attempt ${attempts + 1}) ===")
@@ -84,7 +86,7 @@ object EmbeddingService {
                     
                     val embedding = parseEmbeddingResponse(responseBody)
                     Log.d("EmbeddingService", "Successfully generated embedding with ${embedding.size} dimensions")
-                    return embedding
+                    return@withContext embedding
                 }
                 
             } catch (e: Exception) {
@@ -96,11 +98,11 @@ object EmbeddingService {
                     delay(delayTime)
                 } else {
                     Log.e("EmbeddingService", "Embedding generation failed after all $maxRetries retries.")
-                    return null
+                    return@withContext null
                 }
             }
         }
-        return null
+        return@withContext null
     }
     
     /**

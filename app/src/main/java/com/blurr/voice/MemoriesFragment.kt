@@ -4,7 +4,6 @@ import android.content.Intent
 import android.os.Bundle
 import android.text.Editable
 import android.text.TextWatcher
-import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -16,16 +15,10 @@ import androidx.fragment.app.Fragment
 import androidx.recyclerview.widget.ItemTouchHelper
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.blurr.voice.data.LocalUserDataStore
 import com.blurr.voice.data.UserMemory
-import com.blurr.voice.utilities.FirebaseProviders
 import com.google.android.material.floatingactionbutton.FloatingActionButton
 import com.google.android.material.snackbar.Snackbar
-import com.google.firebase.Timestamp
-import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.firestore.FieldValue
-import com.google.firebase.firestore.ListenerRegistration
-import java.util.Date
-import java.util.UUID
 
 class MemoriesFragment : Fragment() {
 
@@ -33,10 +26,6 @@ class MemoriesFragment : Fragment() {
     private lateinit var emptyStateText: TextView
     private lateinit var addMemoryFab: FloatingActionButton
     private lateinit var memoriesAdapter: MemoriesAdapter
-
-    private val db by lazy { FirebaseProviders.firestore(requireContext().applicationContext) }
-    private val auth by lazy { FirebaseAuth.getInstance() }
-    private var memoriesListener: ListenerRegistration? = null
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -54,20 +43,24 @@ class MemoriesFragment : Fragment() {
         loadMemories()
     }
 
+    override fun onResume() {
+        super.onResume()
+        if (::memoriesAdapter.isInitialized) {
+            loadMemories()
+        }
+    }
+
     private fun setupViews(view: View) {
-        // Setup views
         memoriesRecyclerView = view.findViewById(R.id.memoriesRecyclerView)
         emptyStateText = view.findViewById(R.id.emptyStateText)
         addMemoryFab = view.findViewById(R.id.addMemoryFab)
 
-        // Setup privacy card click listener
         val privacyCard = view.findViewById<com.google.android.material.card.MaterialCardView>(R.id.privacyCard)
         privacyCard.setOnClickListener {
             val intent = Intent(requireContext(), PrivacyActivity::class.java)
             startActivity(intent)
         }
 
-        // Setup FAB click listener
         addMemoryFab.setOnClickListener {
             showAddEditMemoryDialog(null)
         }
@@ -89,7 +82,6 @@ class MemoriesFragment : Fragment() {
             adapter = memoriesAdapter
         }
 
-        // Setup swipe to delete
         val swipeHandler = object : ItemTouchHelper.SimpleCallback(
             0, ItemTouchHelper.LEFT or ItemTouchHelper.RIGHT
         ) {
@@ -112,53 +104,8 @@ class MemoriesFragment : Fragment() {
     }
 
     private fun loadMemories() {
-        val user = auth.currentUser
-        if (user == null) {
-            updateUI(emptyList())
-            return
-        }
-
-        val docRef = db.collection("users").document(user.uid)
-        memoriesListener?.remove()
-        memoriesListener = docRef.addSnapshotListener { snapshot, e ->
-            if (e != null) {
-                FirebaseProviders.handleFirestoreError(
-                    e,
-                    FirebaseProviders.OperationType.GET,
-                    "users/${user.uid}"
-                )
-                Log.w("MemoriesFragment", "Listen failed.", e)
-                return@addSnapshotListener
-            }
-
-            if (snapshot != null && snapshot.exists()) {
-                val memoriesList = mutableListOf<UserMemory>()
-                val memoriesData = snapshot.get("memories") as? List<Map<String, Any>>
-
-                memoriesData?.forEach { map ->
-                    try {
-                        val timestamp = map["createdAt"] as? com.google.firebase.Timestamp
-                        val date = timestamp?.toDate() ?: Date()
-
-                        val memory = UserMemory(
-                            id = map["id"] as? String ?: "",
-                            text = map["text"] as? String ?: "",
-                            source = map["source"] as? String ?: "User",
-                            createdAt = date
-                        )
-                        memoriesList.add(memory)
-                    } catch (e: Exception) {
-                        Log.e("MemoriesFragment", "Error parsing memory", e)
-                    }
-                }
-
-                // Sort by date descending
-                memoriesList.sortByDescending { it.createdAt }
-                updateUI(memoriesList)
-            } else {
-                updateUI(emptyList())
-            }
-        }
+        val memoriesList = LocalUserDataStore.getMemories(requireContext())
+        updateUI(memoriesList)
     }
 
     private fun updateUI(memories: List<UserMemory>) {
@@ -184,7 +131,6 @@ class MemoriesFragment : Fragment() {
             saveButton.text = "Update"
         }
 
-        // Enable/disable save button based on text input
         memoryEditText.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
@@ -218,64 +164,15 @@ class MemoriesFragment : Fragment() {
     }
 
     private fun addMemory(memoryText: String) {
-        val user = auth.currentUser ?: return
-        val newMemory = UserMemory(
-            id = UUID.randomUUID().toString(),
-            text = memoryText,
-            source = "User",
-            createdAt = Date()
-        )
-
-        val docRef = db.collection("users").document(user.uid)
-
-        val memoryMap = hashMapOf(
-            "id" to newMemory.id,
-            "text" to newMemory.text,
-            "source" to newMemory.source,
-            "createdAt" to Timestamp(newMemory.createdAt)
-        )
-
-        docRef.update("memories", FieldValue.arrayUnion(memoryMap))
-            .addOnSuccessListener {
-                Toast.makeText(requireContext(), "Memory added", Toast.LENGTH_SHORT).show()
-            }
-            .addOnFailureListener { e ->
-                FirebaseProviders.handleFirestoreError(
-                    e,
-                    FirebaseProviders.OperationType.UPDATE,
-                    "users/${user.uid}"
-                )
-                Log.e("MemoriesFragment", "Error adding memory", e)
-                Toast.makeText(requireContext(), "Failed to add memory", Toast.LENGTH_SHORT).show()
-            }
+        LocalUserDataStore.addMemory(requireContext(), memoryText, source = "User")
+        loadMemories()
+        Toast.makeText(requireContext(), "Memory added", Toast.LENGTH_SHORT).show()
     }
 
     private fun updateMemory(oldMemory: UserMemory, newText: String) {
-        val user = auth.currentUser ?: return
-        val docRef = db.collection("users").document(user.uid)
-
-        db.runTransaction { transaction ->
-            val snapshot = transaction.get(docRef)
-            val memories = snapshot.get("memories") as? MutableList<Map<String, Any>> ?: mutableListOf()
-
-            // Find the memory with the same ID
-            val index = memories.indexOfFirst { it["id"] == oldMemory.id }
-            if (index != -1) {
-                val newMemoryMap = hashMapOf(
-                    "id" to oldMemory.id,
-                    "text" to newText,
-                    "source" to oldMemory.source,
-                    "createdAt" to oldMemory.createdAt // Keep original creation date
-                )
-                memories[index] = newMemoryMap
-                transaction.update(docRef, "memories", memories)
-            }
-        }.addOnSuccessListener {
-            Toast.makeText(requireContext(), "Memory updated", Toast.LENGTH_SHORT).show()
-        }.addOnFailureListener { e ->
-            Log.e("MemoriesFragment", "Error updating memory", e)
-            Toast.makeText(requireContext(), "Failed to update memory", Toast.LENGTH_SHORT).show()
-        }
+        LocalUserDataStore.updateMemory(requireContext(), oldMemory.id, newText)
+        loadMemories()
+        Toast.makeText(requireContext(), "Memory updated", Toast.LENGTH_SHORT).show()
     }
 
     private fun showDeleteConfirmationDialog(memory: UserMemory) {
@@ -286,7 +183,6 @@ class MemoriesFragment : Fragment() {
                 deleteMemory(memory)
             }
             .setNegativeButton("Cancel") { _, _ ->
-                // Restore the swiped item
                 memoriesAdapter.notifyDataSetChanged()
             }
             .setCancelable(false)
@@ -294,35 +190,14 @@ class MemoriesFragment : Fragment() {
     }
 
     private fun deleteMemory(memory: UserMemory) {
-        val user = auth.currentUser ?: return
-        val docRef = db.collection("users").document(user.uid)
-
-        db.runTransaction { transaction ->
-            val snapshot = transaction.get(docRef)
-            val memories = snapshot.get("memories") as? MutableList<Map<String, Any>> ?: mutableListOf()
-
-            val index = memories.indexOfFirst { it["id"] == memory.id }
-            if (index != -1) {
-                memories.removeAt(index)
-                transaction.update(docRef, "memories", memories)
-            }
-        }.addOnSuccessListener {
-            showSnackbar("Memory deleted")
-        }.addOnFailureListener { e ->
-            Log.e("MemoriesFragment", "Error deleting memory", e)
-            Toast.makeText(requireContext(), "Failed to delete memory", Toast.LENGTH_SHORT).show()
-            memoriesAdapter.notifyDataSetChanged() // Restore item in UI
-        }
+        LocalUserDataStore.deleteMemory(requireContext(), memory.id)
+        loadMemories()
+        showSnackbar("Memory deleted")
     }
 
     private fun showSnackbar(message: String) {
         view?.let {
             Snackbar.make(it, message, Snackbar.LENGTH_LONG).show()
         }
-    }
-
-    override fun onDestroyView() {
-        memoriesListener?.remove()
-        super.onDestroyView()
     }
 }

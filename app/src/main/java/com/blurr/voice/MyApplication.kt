@@ -36,6 +36,9 @@ class MyApplication : Application(), PurchasesUpdatedListener {
 
         private val _isBillingClientReady = MutableStateFlow(false)
         val isBillingClientReady: StateFlow<Boolean> = _isBillingClientReady.asStateFlow()
+
+        private val _isBillingSettled = MutableStateFlow(false)
+        val isBillingSettled: StateFlow<Boolean> = _isBillingSettled.asStateFlow()
     }
 
     override fun onCreate() {
@@ -72,41 +75,52 @@ class MyApplication : Application(), PurchasesUpdatedListener {
     private fun connectToBillingService() {
         if (billingClient.isReady) {
             Logger.d("MyApplication", "BillingClient is already connected.")
+            _isBillingClientReady.value = true
+            _isBillingSettled.value = true
             return
         }
-        billingClient.startConnection(object : BillingClientStateListener {
-            override fun onBillingSetupFinished(billingResult: BillingResult) {
-                when (billingResult.responseCode) {
-                    BillingClient.BillingResponseCode.OK -> {
-                        Logger.d("MyApplication", "BillingClient setup successfully.")
-                        _isBillingClientReady.value = true
-                        reconnectAttempts = 0
-                    }
-                    BillingClient.BillingResponseCode.BILLING_UNAVAILABLE,
-                    BillingClient.BillingResponseCode.FEATURE_NOT_SUPPORTED -> {
-                        Logger.w(
-                            "MyApplication",
-                            "Billing service unavailable on this device (code=${billingResult.responseCode}): ${billingResult.debugMessage}"
-                        )
-                        _isBillingClientReady.value = false
-                    }
-                    else -> {
-                        Logger.w(
-                            "MyApplication",
-                            "BillingClient setup failed (code=${billingResult.responseCode}): ${billingResult.debugMessage}"
-                        )
-                        _isBillingClientReady.value = false
-                        retryConnectionWithBackoff()
+        try {
+            billingClient.startConnection(object : BillingClientStateListener {
+                override fun onBillingSetupFinished(billingResult: BillingResult) {
+                    when (billingResult.responseCode) {
+                        BillingClient.BillingResponseCode.OK -> {
+                            Logger.d("MyApplication", "BillingClient setup successfully.")
+                            _isBillingClientReady.value = true
+                            _isBillingSettled.value = true
+                            reconnectAttempts = 0
+                        }
+                        BillingClient.BillingResponseCode.BILLING_UNAVAILABLE,
+                        BillingClient.BillingResponseCode.FEATURE_NOT_SUPPORTED -> {
+                            Logger.w(
+                                "MyApplication",
+                                "Billing service unavailable on this device (code=${billingResult.responseCode}): ${billingResult.debugMessage}"
+                            )
+                            _isBillingClientReady.value = false
+                            _isBillingSettled.value = true
+                        }
+                        else -> {
+                            Logger.w(
+                                "MyApplication",
+                                "BillingClient setup failed (code=${billingResult.responseCode}): ${billingResult.debugMessage}"
+                            )
+                            _isBillingClientReady.value = false
+                            _isBillingSettled.value = true
+                            retryConnectionWithBackoff()
+                        }
                     }
                 }
-            }
 
-            override fun onBillingServiceDisconnected() {
-                Logger.w("MyApplication", "Billing service disconnected. Retrying...")
-                _isBillingClientReady.value = false
-                retryConnectionWithBackoff()
-            }
-        })
+                override fun onBillingServiceDisconnected() {
+                    Logger.w("MyApplication", "Billing service disconnected. Retrying...")
+                    _isBillingClientReady.value = false
+                    retryConnectionWithBackoff()
+                }
+            })
+        } catch (e: Exception) {
+            Logger.e("MyApplication", "Failed to start BillingClient connection", e)
+            _isBillingClientReady.value = false
+            _isBillingSettled.value = true
+        }
     }
 
     private fun retryConnectionWithBackoff() {
@@ -119,6 +133,7 @@ class MyApplication : Application(), PurchasesUpdatedListener {
                 connectToBillingService()
             }
         } else {
+            _isBillingSettled.value = true
             Logger.w("MyApplication", "Max billing reconnect attempts reached. Will not retry further.")
         }
     }

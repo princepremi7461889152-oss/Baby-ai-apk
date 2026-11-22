@@ -2,15 +2,22 @@ package com.blurr.voice.utilities
 
 import android.util.Log
 import com.blurr.voice.MyApplication
-import com.google.firebase.Firebase
-import com.google.firebase.auth.auth
+import com.google.firebase.FirebaseApp
 import com.google.firebase.firestore.FieldValue
 import kotlinx.coroutines.tasks.await
 
 class FreemiumManager {
 
+    private fun isFirebaseConfigured(): Boolean {
+        return try {
+            FirebaseApp.getApps(MyApplication.appContext).isNotEmpty()
+        } catch (_: Exception) {
+            false
+        }
+    }
+
     private val db by lazy { FirebaseProviders.firestore(MyApplication.appContext) }
-    private val auth by lazy { Firebase.auth }
+    private val localUserId by lazy { UserIdManager(MyApplication.appContext).getOrCreateUserId() }
 
     companion object {
         const val DAILY_TASK_LIMIT = 15
@@ -18,6 +25,7 @@ class FreemiumManager {
     }
 
     suspend fun getDeveloperMessage(): String {
+        if (!isFirebaseConfigured()) return ""
         return try {
             val document = db.collection("settings").document("freemium").get().await()
             document.getString("developerMessage") ?: ""
@@ -33,9 +41,9 @@ class FreemiumManager {
     }
 
     suspend fun isUserSubscribed(): Boolean {
-        val currentUser = auth.currentUser ?: return false
+        if (!isFirebaseConfigured()) return false
         return try {
-            val document = db.collection("users").document(currentUser.uid).get().await()
+            val document = db.collection("users").document(localUserId).get().await()
             if (document.exists()) {
                 document.getString("plan") == PRO_SKU
             } else {
@@ -45,7 +53,7 @@ class FreemiumManager {
             FirebaseProviders.handleFirestoreError(
                 e,
                 FirebaseProviders.OperationType.GET,
-                "users/${currentUser.uid}"
+                "users/$localUserId"
             )
             Logger.e("FreemiumManager", "Error checking user plan from Firestore", e)
             false
@@ -53,15 +61,16 @@ class FreemiumManager {
     }
 
     suspend fun provisionUserIfNeeded() {
-        val currentUser = auth.currentUser ?: return
-        val userDocRef = db.collection("users").document(currentUser.uid)
+        if (!isFirebaseConfigured()) return
+        val userDocRef = db.collection("users").document(localUserId)
+        val userEmail = UserProfileManager(MyApplication.appContext).getEmail().orEmpty()
 
         try {
             val document = userDocRef.get().await()
             if (!document.exists()) {
-                Logger.d("FreemiumManager", "Provisioning new user: ${currentUser.uid}")
+                Logger.d("FreemiumManager", "Provisioning local user doc: $localUserId")
                 val newUser = hashMapOf(
-                    "email" to (currentUser.email ?: ""),
+                    "email" to userEmail,
                     "plan" to "free",
                     "tasksRemaining" to DAILY_TASK_LIMIT.toLong(),
                     "createdAt" to FieldValue.serverTimestamp(),
@@ -78,63 +87,63 @@ class FreemiumManager {
             FirebaseProviders.handleFirestoreError(
                 e,
                 FirebaseProviders.OperationType.WRITE,
-                "users/${currentUser.uid}"
+                "users/$localUserId"
             )
             Logger.e("FreemiumManager", "Error provisioning user", e)
         }
     }
 
     suspend fun getTasksRemaining(): Long? {
+        if (!isFirebaseConfigured()) return DAILY_TASK_LIMIT.toLong()
         if (isUserSubscribed()) return Long.MAX_VALUE
-        val currentUser = auth.currentUser ?: return null
         return try {
-            val document = db.collection("users").document(currentUser.uid).get().await()
-            document.getLong("tasksRemaining")
+            val document = db.collection("users").document(localUserId).get().await()
+            document.getLong("tasksRemaining") ?: DAILY_TASK_LIMIT.toLong()
         } catch (e: Exception) {
             FirebaseProviders.handleFirestoreError(
                 e,
                 FirebaseProviders.OperationType.GET,
-                "users/${currentUser.uid}"
+                "users/$localUserId"
             )
             Logger.e("FreemiumManager", "Error fetching tasks remaining", e)
-            null
+            DAILY_TASK_LIMIT.toLong()
         }
     }
 
     suspend fun canPerformTask(): Boolean {
+        if (!isFirebaseConfigured()) return true
         if (isUserSubscribed()) return true
-        val currentUser = auth.currentUser ?: return false
 
         return try {
-            val document = db.collection("users").document(currentUser.uid).get().await()
-            val tasksRemaining = document.getLong("tasksRemaining") ?: 0L
+            val document = db.collection("users").document(localUserId).get().await()
+            val tasksRemaining = document.getLong("tasksRemaining") ?: DAILY_TASK_LIMIT.toLong()
             Logger.d("FreemiumManager", "User has $tasksRemaining tasks remaining.")
             tasksRemaining > 0L
         } catch (e: Exception) {
             FirebaseProviders.handleFirestoreError(
                 e,
                 FirebaseProviders.OperationType.GET,
-                "users/${currentUser.uid}"
+                "users/$localUserId"
             )
             Logger.e("FreemiumManager", "Error fetching user task count", e)
-            false
+            true
         }
     }
 
     suspend fun decrementTaskCount() {
+        if (!isFirebaseConfigured()) return
         if (isUserSubscribed()) return
-        val currentUser = auth.currentUser ?: return
 
-        val userDocRef = db.collection("users").document(currentUser.uid)
+        val userDocRef = db.collection("users").document(localUserId)
 
         try {
             userDocRef.update("tasksRemaining", FieldValue.increment(-1)).await()
-            Logger.d("FreemiumManager", "Successfully decremented task count for user ${currentUser.uid}.")
+            Logger.d("FreemiumManager", "Successfully decremented task count for user $localUserId.")
         } catch (e: Exception) {
             FirebaseProviders.handleFirestoreError(
                 e,
                 FirebaseProviders.OperationType.UPDATE,
-                "users/${currentUser.uid}"
+                "users/$localUserId"
             )
             Logger.e("FreemiumManager", "Failed to decrement task count.", e)
         }

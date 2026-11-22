@@ -126,16 +126,10 @@ dependencies {
   implementation(libs.porcupine.android)
   implementation(libs.billing.ktx)
 
-  implementation(libs.firebase.ai)
-  implementation(libs.firebase.appcheck.recaptcha)
-  implementation(libs.firebase.appcheck.debug)
+  // Firebase Auth, Credential Manager, and Firebase AI Logic removed per user configuration
   implementation(libs.firebase.analytics)
-  implementation(libs.firebase.auth)
   implementation(libs.firebase.config)
   implementation(libs.firebase.firestore)
-  implementation(libs.androidx.credentials)
-  implementation(libs.androidx.credentials.play.services)
-  implementation(libs.googleid)
   implementation(libs.play.services.basement)
 
   implementation(libs.kotlinx.coroutines.android)

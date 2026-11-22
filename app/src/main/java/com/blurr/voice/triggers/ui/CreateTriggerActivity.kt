@@ -105,10 +105,12 @@ class CreateTriggerActivity : AppCompatActivity() {
             }
         } else {
             // Create mode
-            selectedTriggerType = intent.getSerializableExtra("EXTRA_TRIGGER_TYPE") as TriggerType
+            @Suppress("DEPRECATION")
+            selectedTriggerType = (intent.getSerializableExtra("EXTRA_TRIGGER_TYPE") as? TriggerType)
+                ?: TriggerType.SCHEDULED_TIME
             // Set default checked state for all day chips
             for (i in 0 until dayOfWeekChipGroup.childCount) {
-                (dayOfWeekChipGroup.getChildAt(i) as com.google.android.material.chip.Chip).isChecked = true
+                (dayOfWeekChipGroup.getChildAt(i) as? com.google.android.material.chip.Chip)?.isChecked = true
             }
         }
 
@@ -210,7 +212,10 @@ class CreateTriggerActivity : AppCompatActivity() {
                 }
                 // Then check the ones from the trigger
                 trigger.daysOfWeek.forEach { day ->
-                    (dayOfWeekChipGroup.getChildAt(day - 1) as com.google.android.material.chip.Chip).isChecked = true
+                    val index = day - 1
+                    if (index in 0 until dayOfWeekChipGroup.childCount) {
+                        (dayOfWeekChipGroup.getChildAt(index) as? com.google.android.material.chip.Chip)?.isChecked = true
+                    }
                 }
             }
             TriggerType.NOTIFICATION -> {
@@ -393,7 +398,7 @@ class CreateTriggerActivity : AppCompatActivity() {
     private fun showExactAlarmPermissionDialog() {
         val dialog = androidx.appcompat.app.AlertDialog.Builder(this)
             .setTitle("Permission Required")
-            .setMessage("To schedule tasks at a precise time, Panda needs the 'Alarms & Reminders' permission. Please grant this in the next screen.")
+            .setMessage("To schedule tasks at a precise time, Baby needs the 'Alarms & Reminders' permission. Please grant this in the next screen.")
             .setPositiveButton("Grant Permission") { _, _ ->
                 if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
                     startActivity(android.content.Intent(android.provider.Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM))
