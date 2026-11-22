@@ -135,4 +135,10 @@
     <string name="openhands_title">OpenHands Software Agent</string>
     <string name="openhands_desc">Run CodeActAgent, ReadOnlyAgent, and BrowsingAgent in an isolated Event-Stream sandbox with microagents, file editing, and optional remote OpenHands server connectivity.</string>
     <string name="open_openhands">Open OpenHands Workspace</string>
+    <string name="test_connection">Test Connection</string>
+    <string name="gemini_live_voice_title">Gemini Live Real-Time Voice</string>
+    <string name="gemini_live_voice_desc">Use Gemini Live native audio (Hindi, Hinglish, English) with one consistent voice, interruption support, and screen-locked sessions.</string>
+    <string name="groq_api_section_title">Groq AI Engine</string>
+    <string name="groq_api_section_desc">Fast secondary text reasoning (Llama / GPT-OSS) and optional Whisper speech-to-text. Keys stay only on this device.</string>
+    <string name="get_groq_api_key_link"><u>Get a Groq API key from Groq Console</u></string>
 </resources>

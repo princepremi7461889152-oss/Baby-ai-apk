@@ -293,6 +293,76 @@ object GeminiRestAiRepository : AiRepository {
         }
     }
 
+    suspend fun testConnection(
+        context: Context,
+        apiKeyOverride: String? = null,
+        modelName: String = AiRepository.DEFAULT_MODEL
+    ): ConnectionTestResult = withContext(Dispatchers.IO) {
+        val cleanKey = (apiKeyOverride ?: getUserApiKey(context))?.trim().orEmpty()
+        val effectiveModel = resolveModelName(modelName)
+        if (cleanKey.isEmpty()) {
+            return@withContext ConnectionTestResult(
+                success = false,
+                provider = "Gemini",
+                model = effectiveModel,
+                message = "Please enter your Gemini API key first."
+            )
+        }
+
+        val startedAt = System.currentTimeMillis()
+        val payload = JSONObject().apply {
+            put("contents", JSONArray().apply {
+                put(JSONObject().apply {
+                    put("role", "user")
+                    put("parts", JSONArray().apply {
+                        put(JSONObject().put("text", "Reply with only: OK"))
+                    })
+                })
+            })
+            put("generationConfig", JSONObject().apply {
+                put("maxOutputTokens", 8)
+                put("temperature", 0.0)
+            })
+        }
+
+        return@withContext try {
+            withTimeout(20_000L) {
+                executeGenerateContent(effectiveModel, cleanKey, payload)
+            }
+            val latency = (System.currentTimeMillis() - startedAt).coerceAtLeast(1L)
+            ConnectionTestResult(
+                success = true,
+                provider = "Gemini",
+                model = effectiveModel,
+                latencyMs = latency,
+                message = "Connected to Gemini ($effectiveModel) in ${latency}ms."
+            )
+        } catch (e: NonRetryableApiException) {
+            val latency = (System.currentTimeMillis() - startedAt).coerceAtLeast(1L)
+            val friendly = when (e.statusCode) {
+                400, 401, 403 -> "Invalid or unauthorized Gemini API key (HTTP ${e.statusCode}). Please verify your key in Google AI Studio."
+                404 -> "Gemini model '$effectiveModel' not available (HTTP 404)."
+                else -> e.message ?: "Gemini connection failed (HTTP ${e.statusCode})."
+            }
+            ConnectionTestResult(
+                success = false,
+                provider = "Gemini",
+                model = effectiveModel,
+                latencyMs = latency,
+                message = friendly
+            )
+        } catch (e: Exception) {
+            val latency = (System.currentTimeMillis() - startedAt).coerceAtLeast(1L)
+            ConnectionTestResult(
+                success = false,
+                provider = "Gemini",
+                model = effectiveModel,
+                latencyMs = latency,
+                message = "Gemini connection failed: ${e.message ?: "Network error"}"
+            )
+        }
+    }
+
     private suspend fun executeGenerateContent(
         modelName: String,
         apiKey: String,

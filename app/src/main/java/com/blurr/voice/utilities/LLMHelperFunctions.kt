@@ -1,6 +1,8 @@
 package com.blurr.voice.utilities
 
 import android.graphics.Bitmap
+import com.blurr.voice.MyApplication
+import com.blurr.voice.api.DualAiRouter
 import com.blurr.voice.api.GeminiApi
 import com.blurr.voice.api.ImagePart
 import com.blurr.voice.api.TextPart
@@ -53,6 +55,11 @@ fun addResponsePrePost(
 suspend fun getReasoningModelApiResponse(
     chat: List<Pair<String, List<Any>>>,
 ): String? {
-    return GeminiApi.generateContent(chat) // MODIFIED: Pass agent state
+    val ctx = runCatching { MyApplication.appContext }.getOrNull()
+    return if (ctx != null) {
+        DualAiRouter.generateText(ctx, chat).text
+    } else {
+        GeminiApi.generateContent(chat)
+    }
 }
 

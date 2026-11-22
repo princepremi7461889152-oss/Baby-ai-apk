@@ -245,6 +245,11 @@ class MainActivity : BaseNavigationActivity() {
     }
 
     private fun startConversationalAgent() {
+        if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.RECORD_AUDIO) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            Toast.makeText(this, "Please grant microphone permission to talk with Baby.", Toast.LENGTH_SHORT).show()
+            permissionManager.requestMicrophonePermission()
+            return
+        }
         if (!ConversationalAgentService.isRunning) {
             val serviceIntent = Intent(this, ConversationalAgentService::class.java)
             ContextCompat.startForegroundService(this, serviceIntent)

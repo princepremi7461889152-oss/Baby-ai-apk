@@ -56,8 +56,18 @@ import com.blurr.voice.utilities.ServicePermissionManager
 import com.blurr.voice.utilities.PandaStateManager
 import com.blurr.voice.v2.perception.Perception
 import com.blurr.voice.v2.perception.SemanticParser
+import android.app.KeyguardManager
+import android.content.pm.ServiceInfo
+import android.os.PowerManager
+import androidx.core.app.ServiceCompat
+import com.blurr.voice.live.GeminiLiveAudioEngine
+import com.blurr.voice.live.GeminiLiveProtocol
+import com.blurr.voice.live.LiveSessionState
+import com.blurr.voice.utilities.AiEnginePreferences
+import com.blurr.voice.utilities.GeminiKeyManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
@@ -113,11 +123,18 @@ class ConversationalAgentService : Service() {
     private var conversationId: String? = null // Track current conversation session
     private var memoriesListener: ListenerRegistration? = null
 
+    private val geminiLiveEngine by lazy { GeminiLiveAudioEngine(applicationContext) }
+    private var liveObserverJob: Job? = null
+    private var isLiveModeActive = false
+    private var wakeLock: PowerManager.WakeLock? = null
+    private var currentNotificationStatus = "Initializing Gemini Live voice..."
 
     companion object {
         const val NOTIFICATION_ID = 3
         const val CHANNEL_ID = "ConversationalAgentChannel"
         const val ACTION_STOP_SERVICE = "com.blurr.voice.ACTION_STOP_SERVICE"
+        const val ACTION_TOGGLE_MUTE = "com.blurr.voice.ACTION_TOGGLE_MUTE"
+        const val ACTION_INTERRUPT_LIVE = "com.blurr.voice.ACTION_INTERRUPT_LIVE"
         var isRunning = false
         const val MEMORY_ENABLED = true
     }
@@ -183,31 +200,55 @@ class ConversationalAgentService : Service() {
      */
     private fun enterTextMode() {
         if (isTextModeActive) return
-        Log.d("ConvAgent", "Entering Text Mode. Stopping STT/TTS.")
-        
-        // Track text mode activation
+        Log.d("ConvAgent", "Entering Text Mode. Pausing live/STT audio.")
+
         firebaseAnalytics?.logEvent("text_mode_activated", null)
-        
+
         isTextModeActive = true
+        if (isLiveModeActive) {
+            geminiLiveEngine.setMuted(true)
+            geminiLiveEngine.interruptPlayback()
+        }
         pandaStateManager.setState(PandaState.IDLE)
         speechCoordinator.stopListening()
         speechCoordinator.stopSpeaking()
-        // Optionally hide the transcription view since user is typing
         visualFeedbackManager.hideTranscription()
     }
 
 
     @RequiresApi(Build.VERSION_CODES.R)
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        Log.d("ConvAgent", "Service onStartCommand")
+        Log.d("ConvAgent", "Service onStartCommand action=${intent?.action}")
 
-        if (intent?.action == ACTION_STOP_SERVICE) {
-            Log.i("ConvAgent", "Received stop action. Stopping service.")
-            stopSelf()
-            return START_NOT_STICKY
+        when (intent?.action) {
+            ACTION_STOP_SERVICE -> {
+                Log.i("ConvAgent", "Received stop action. Stopping service.")
+                stopSelf()
+                return START_NOT_STICKY
+            }
+            ACTION_TOGGLE_MUTE -> {
+                if (isLiveModeActive) {
+                    val nextMuted = !geminiLiveEngine.isMuted.value
+                    geminiLiveEngine.setMuted(nextMuted)
+                    updateNotification(
+                        if (nextMuted) "Microphone muted • Tap Unmute to continue"
+                        else "Gemini Live (${geminiLiveEngine.getLockedSessionVoice()}) • Listening"
+                    )
+                }
+                return START_STICKY
+            }
+            ACTION_INTERRUPT_LIVE -> {
+                if (isLiveModeActive) {
+                    geminiLiveEngine.interruptPlayback()
+                    updateNotification("Gemini Live (${geminiLiveEngine.getLockedSessionVoice()}) • Listening")
+                } else {
+                    speechCoordinator.stopSpeaking()
+                }
+                return START_STICKY
+            }
         }
-        
-        // Check if we have the required RECORD_AUDIO permission
+
+        // Check if we have the required RECORD_AUDIO permission before starting microphone foreground service
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             Log.e("ConvAgent", "RECORD_AUDIO permission not granted. Cannot start foreground service.")
             Toast.makeText(this, "Microphone permission required for voice assistant", Toast.LENGTH_LONG).show()
@@ -216,39 +257,168 @@ class ConversationalAgentService : Service() {
         }
 
         try {
-            startForeground(NOTIFICATION_ID, createNotification())
-        } catch (e: SecurityException) {
-            serviceScope.launch {
-                speechCoordinator.speakText("Hello, please give microphone permission or some other type of permission you have not given me! My code is open source, so you can check that out if you have any doubts.")
-                delay(2000) // Wait for TTS to complete before closing service
-                stopSelf()
+            val fgType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+            } else {
+                0
             }
-            Log.e("ConvAgent", "Failed to start foreground service: ${e.message}")
-            Toast.makeText(this, "Cannot start voice assistant - permission missing", Toast.LENGTH_LONG).show()
+            ServiceCompat.startForeground(this, NOTIFICATION_ID, createNotification(), fgType)
+        } catch (e: SecurityException) {
+            Log.e("ConvAgent", "Failed to start microphone foreground service: ${e.message}")
+            Toast.makeText(this, "Cannot start voice assistant - microphone foreground permission missing", Toast.LENGTH_LONG).show()
+            stopSelf()
             return START_NOT_STICKY
         }
 
         if (!servicePermissionManager.isMicrophonePermissionGranted()) {
             Log.e("ConvAgent", "RECORD_AUDIO permission not granted. Shutting down.")
-            serviceScope.launch {
-                ttsManager.speakText(getString(R.string.microphone_permission_not_granted))
-                delay(2000)
-                stopSelf()
-            }
+            stopSelf()
             return START_NOT_STICKY
         }
 
-        // Track conversation initiation
+        acquireVoiceWakeLock()
+
         firebaseAnalytics?.logEvent("conversation_initiated", null)
         trackConversationStart()
 
-        // Skip greeting and start listening immediately
         serviceScope.launch {
-            Log.d("ConvAgent", "Starting immediate listening (no greeting)")
-            pandaStateManager.setState(PandaState.LISTENING)
-            startImmediateListening()
+            val geminiKey = GeminiKeyManager(this@ConversationalAgentService).getApiKey()
+            val useLive = AiEnginePreferences.isGeminiLiveVoiceEnabled(this@ConversationalAgentService)
+            if (useLive && !geminiKey.isNullOrBlank()) {
+                val liveStarted = startGeminiLiveVoiceSession(geminiKey)
+                if (!liveStarted) {
+                    Log.w("ConvAgent", "Gemini Live failed to connect; falling back to turn-based voice mode.")
+                    startImmediateListening()
+                }
+            } else {
+                Log.d("ConvAgent", "Starting turn-based listening (liveEnabled=$useLive, hasGeminiKey=${!geminiKey.isNullOrBlank()})")
+                pandaStateManager.setState(PandaState.LISTENING)
+                startImmediateListening()
+            }
         }
         return START_STICKY
+    }
+
+    private fun acquireVoiceWakeLock() {
+        try {
+            if (wakeLock?.isHeld == true) return
+            val pm = getSystemService(Context.POWER_SERVICE) as? PowerManager ?: return
+            wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "BabyAI:LiveVoiceWakeLock").apply {
+                setReferenceCounted(false)
+                acquire(60 * 60 * 1000L) // Safety 1h cap; always released on destroy
+            }
+        } catch (e: Exception) {
+            Log.w("ConvAgent", "Unable to acquire partial wake lock: ${e.message}")
+        }
+    }
+
+    private fun releaseVoiceWakeLock() {
+        try {
+            wakeLock?.let {
+                if (it.isHeld) it.release()
+            }
+        } catch (e: Exception) {
+            Log.w("ConvAgent", "Error releasing wake lock: ${e.message}")
+        } finally {
+            wakeLock = null
+        }
+    }
+
+    private fun isDeviceLocked(): Boolean {
+        val km = getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
+        return km?.isKeyguardLocked == true
+    }
+
+    private suspend fun startGeminiLiveVoiceSession(apiKey: String): Boolean {
+        val profileName = UserProfileManager(this).getName()
+        val memoriesText = if (cachedMemories.isNotEmpty()) {
+            cachedMemories.take(25).joinToString("\n") { "- ${it.text}" }
+        } else null
+        val screenSummary = runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && servicePermissionManager.isAccessibilityServiceEnabled()) {
+                Perception(Eyes(this), SemanticParser()).analyze(all = true).uiRepresentation.take(1200)
+            } else null
+        }.getOrNull()
+
+        val systemInstruction = GeminiLiveProtocol.buildDefaultSystemInstruction(
+            userName = profileName,
+            memoriesSummary = memoriesText,
+            screenSummary = screenSummary
+        )
+
+        val voiceName = AiEnginePreferences.getGeminiLiveVoice(this)
+        updateNotification("Connecting Gemini Live ($voiceName)...")
+
+        liveObserverJob?.cancel()
+        liveObserverJob = serviceScope.launch {
+            launch {
+                geminiLiveEngine.sessionState.collect { state ->
+                    when (state) {
+                        LiveSessionState.CONNECTING -> {
+                            pandaStateManager.setState(PandaState.PROCESSING)
+                            updateNotification("Connecting Gemini Live ($voiceName)...")
+                        }
+                        LiveSessionState.READY_LISTENING -> {
+                            pandaStateManager.setState(PandaState.LISTENING)
+                            val lockTag = if (isDeviceLocked()) "Screen-lock active • " else ""
+                            updateNotification("${lockTag}Gemini Live ($voiceName) • Listening")
+                        }
+                        LiveSessionState.SPEAKING -> {
+                            pandaStateManager.setState(PandaState.SPEAKING)
+                            updateNotification("Gemini Live ($voiceName) • Speaking")
+                        }
+                        LiveSessionState.INTERRUPTED -> {
+                            pandaStateManager.setState(PandaState.LISTENING)
+                            updateNotification("Gemini Live ($voiceName) • Listening")
+                        }
+                        LiveSessionState.MUTED -> {
+                            pandaStateManager.setState(PandaState.IDLE)
+                            updateNotification("Gemini Live ($voiceName) • Muted")
+                        }
+                        LiveSessionState.ERROR -> {
+                            pandaStateManager.triggerErrorState()
+                            val err = geminiLiveEngine.errorMessage.value ?: "Connection error"
+                            updateNotification("Gemini Live error: ${err.take(60)}")
+                        }
+                        LiveSessionState.DISCONNECTED -> {
+                            pandaStateManager.setState(PandaState.IDLE)
+                        }
+                    }
+                }
+            }
+            launch {
+                geminiLiveEngine.lastInputTranscript.collect { transcript ->
+                    if (transcript.isNotBlank() && !isDeviceLocked()) {
+                        visualFeedbackManager.showTranscription(transcript)
+                    }
+                }
+            }
+            launch {
+                geminiLiveEngine.lastOutputTranscript.collect { transcript ->
+                    if (transcript.isNotBlank()) {
+                        if (!isDeviceLocked()) {
+                            visualFeedbackManager.showTranscription(transcript)
+                        }
+                    }
+                }
+            }
+        }
+
+        val started = geminiLiveEngine.startSession(
+            apiKey = apiKey,
+            systemInstruction = systemInstruction,
+            onError = { err ->
+                mainHandler.post {
+                    Toast.makeText(this@ConversationalAgentService, "Gemini Live: $err", Toast.LENGTH_LONG).show()
+                }
+            }
+        )
+        isLiveModeActive = started
+        if (!started) {
+            liveObserverJob?.cancel()
+            liveObserverJob = null
+        }
+        return started
     }
 
     /**
@@ -959,37 +1129,74 @@ class ConversationalAgentService : Service() {
             return ModelDecision(reply = "I had a minor issue processing that. Could you try again?")
         }
     }
-    private fun createNotification(): Notification {
-        val stopIntent = Intent(this, ConversationalAgentService::class.java).apply {
-            action = ACTION_STOP_SERVICE
-        }
-        val stopPendingIntent = PendingIntent.getService(
+    private fun createNotification(statusText: String = currentNotificationStatus): Notification {
+        currentNotificationStatus = statusText
+        val openAppIntent = PendingIntent.getActivity(
             this,
-            0,
-            stopIntent,
+            10,
+            Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
+        val muteIntent = PendingIntent.getService(
+            this,
+            1,
+            Intent(this, ConversationalAgentService::class.java).apply {
+                action = ACTION_TOGGLE_MUTE
+            },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val stopPendingIntent = PendingIntent.getService(
+            this,
+            0,
+            Intent(this, ConversationalAgentService::class.java).apply {
+                action = ACTION_STOP_SERVICE
+            },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val isMuted = geminiLiveEngine.isMuted.value
+        val muteLabel = if (isMuted) "Unmute" else "Mute"
+
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Conversational Agent")
-            .setContentText("Listening for your commands...")
+            .setContentTitle("Baby Live Voice")
+            .setContentText(statusText)
+            .setStyle(NotificationCompat.BigTextStyle().bigText("$statusText • Hindi / Hinglish / English"))
             .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setContentIntent(openAppIntent)
             .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .addAction(
-                android.R.drawable.ic_media_pause, // Using built-in pause icon as stop button
+                android.R.drawable.ic_btn_speak_now,
+                muteLabel,
+                muteIntent
+            )
+            .addAction(
+                android.R.drawable.ic_media_pause,
                 "Stop",
                 stopPendingIntent
             )
             .build()
     }
 
+    private fun updateNotification(statusText: String) {
+        currentNotificationStatus = statusText
+        val manager = getSystemService(NotificationManager::class.java) ?: return
+        manager.notify(NOTIFICATION_ID, createNotification(statusText))
+    }
+
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val serviceChannel = NotificationChannel(
                 CHANNEL_ID,
-                "Conversational Agent Service Channel",
-                NotificationManager.IMPORTANCE_DEFAULT
-            )
+                "Baby Live Voice Service",
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = "Active microphone foreground service for real-time voice conversations"
+                setShowBadge(false)
+            }
             val manager = getSystemService(NotificationManager::class.java)
             manager?.createNotificationChannel(serviceChannel)
         }
@@ -1124,6 +1331,12 @@ class ConversationalAgentService : Service() {
         // Track conversation end in Firebase
 
         trackConversationEnd(endReason)
+
+        liveObserverJob?.cancel()
+        liveObserverJob = null
+        geminiLiveEngine.stop()
+        isLiveModeActive = false
+        releaseVoiceWakeLock()
         
         visualFeedbackManager.hideTtsWave()
         visualFeedbackManager.hideTranscription()
@@ -1161,6 +1374,12 @@ class ConversationalAgentService : Service() {
         trackConversationEnd("instant")
         
         Log.d("ConvAgent", "Instant shutdown triggered by user.")
+        liveObserverJob?.cancel()
+        liveObserverJob = null
+        geminiLiveEngine.stop()
+        isLiveModeActive = false
+        releaseVoiceWakeLock()
+
         withContext(Dispatchers.Main) {
             speechCoordinator.stopSpeaking()
             speechCoordinator.stopListening()
@@ -1290,6 +1509,12 @@ class ConversationalAgentService : Service() {
         super.onDestroy()
         Log.d("ConvAgent", "Service onDestroy")
         memoriesListener?.remove()
+
+        liveObserverJob?.cancel()
+        liveObserverJob = null
+        geminiLiveEngine.stop()
+        isLiveModeActive = false
+        releaseVoiceWakeLock()
 
         overlayManager.stopObserving()
         firebaseAnalytics?.logEvent("conversational_agent_destroyed", null)
